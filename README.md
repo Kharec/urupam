@@ -10,6 +10,7 @@
 
 ## Roadmap
 
+- [x] create installation script
 - [ ] connect to redis
 - [ ] create dummy API endpoints
 - [ ] decide how to handle short url generation
@@ -18,7 +19,6 @@
 - [ ] validate URLs and handle errors
 - [ ] create a simple and clean UI
 - [ ] manage/delete short urls
-- [ ] create installation script
 - [ ] create systemd service
 - [ ] create `Dockerfile`
 - [ ] create `docker-compose.yml`
