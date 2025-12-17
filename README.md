@@ -54,7 +54,7 @@ Run the installation script:
 scripts/install.sh
 ```
 
-Activate/enable the systemd service:
+Enable and start the systemd service:
 
 ```sh
 sudo systemctl enable --now urupam
