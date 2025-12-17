@@ -2,11 +2,10 @@
 
 `urupam` is a lightweight URL shortener built with Perl and Mojolicious, and backed by Redis.
 
-## Requirements
+## Basic requirements
 
 - Perl 5.42.0
-- Mojolicious 9.42
-- Carton
+- Carton (handles perl deps)
 - Redis
 
 ## Roadmap
