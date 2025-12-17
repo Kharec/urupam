@@ -6,6 +6,7 @@
 
 - Perl 5.42.0
 - Mojolicious 9.42
+- Carton
 
 ## Roadmap
 
@@ -17,15 +18,13 @@
 - [ ] validate URLs and handle errors
 - [ ] create a simple and clean UI
 - [ ] manage/delete short urls
-- [ ] create `Makefile.PL`
+- [ ] create installation script
 - [ ] create systemd service
 - [ ] create `Dockerfile`
 - [ ] create `docker-compose.yml`
 - [ ] add unit tests along the way
 
 ## How to run
-
-### Dev
 
 To run the application in development, you'll first need a Redis server. The easiest way is to start a local Redis instance using Docker:
 
@@ -47,15 +46,12 @@ carton exec morbo bin/urupam
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your browser.
 
-### Install
+## Installation
 
-Use the provided `Makefile.pl`:
+Run the installation script:
 
 ```sh
-perl Makefile.PL
-make
-make test
-sudo make install
+scripts/install.sh
 ```
 
 Activate/enable the systemd service:
