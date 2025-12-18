@@ -29,14 +29,17 @@ sub startup {
                 sub {
                     my $value = shift;
                     $c->app->log->info("Value retrieved: $value");
-                    $c->render( text => "ok\nRetrieved value: $value" );
+                    $c->render( json => { status => 'ok', value => $value } );
                     undef $tx;
                 }
             )->catch(
                 sub {
                     my $err = shift;
                     $c->app->log->error("DB error: $err");
-                    $c->render( text => "ok\nError: $err", status => 500 );
+                    $c->render(
+                        json   => { status => 'error', message => "$err" },
+                        status => 500
+                    );
                     undef $tx;
                 }
             );
@@ -45,4 +48,3 @@ sub startup {
 }
 
 1;
-
