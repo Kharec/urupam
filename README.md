@@ -11,7 +11,7 @@
 ## Roadmap
 
 - [x] create installation script
-- [ ] connect to redis
+- [x] connect to redis + setter and getter operations
 - [ ] create dummy API endpoints
 - [ ] decide how to handle short url generation
 - [ ] avoid collisions in short urls
