@@ -141,6 +141,20 @@ DISTRIBUTIONS
       perl 5.006
       strict 0
       warnings 0
+  Mojo-Redis2-0.32
+    pathname: D/DB/DBOOK/Mojo-Redis2-0.32.tar.gz
+    provides:
+      Mojo::Redis2 0.32
+      Mojo::Redis2::Backend undef
+      Mojo::Redis2::Bulk undef
+      Mojo::Redis2::Client undef
+      Mojo::Redis2::Cursor undef
+      Mojo::Redis2::Server undef
+      Mojo::Redis2::Transaction 0.01
+    requirements:
+      ExtUtils::MakeMaker 0
+      Mojolicious 7.50
+      Protocol::Redis 1.0
   Mojolicious-9.42
     pathname: S/SR/SRI/Mojolicious-9.42.tar.gz
     provides:
@@ -787,6 +801,16 @@ DISTRIBUTIONS
       Scalar::Util 1.18
       XSLoader 0.22
       parent 0
+  Protocol-Redis-1.0021
+    pathname: U/UN/UNDEF/Protocol-Redis-1.0021.tar.gz
+    provides:
+      Protocol::Redis 1.0021
+      Protocol::Redis::Test undef
+    requirements:
+      Carp 0
+      ExtUtils::MakeMaker 0
+      Test::More 0.94
+      perl 5.008001
   Sub-Exporter-0.991
     pathname: R/RJ/RJBS/Sub-Exporter-0.991.tar.gz
     provides:
