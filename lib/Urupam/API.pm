@@ -50,7 +50,7 @@ sub shorten {
         sub {
             my $err = shift;
             $c->app->log->error("API URL validation/creation error: $err");
-            my $status          = $c->get_error_status($err);
+            my $status          = Urupam::Utils::get_error_status($err);
             my $sanitized_error = Urupam::Utils::sanitize_error_message($err);
             $c->render(
                 json   => { error => $sanitized_error },
@@ -100,7 +100,7 @@ sub get_url {
         sub {
             my $err = shift;
             $c->app->log->error("API URL retrieval error: $err");
-            my $status          = $c->get_error_status($err);
+            my $status          = Urupam::Utils::get_error_status($err);
             my $sanitized_error = Urupam::Utils::sanitize_error_message($err);
             $c->render(
                 json   => { error => $sanitized_error },
