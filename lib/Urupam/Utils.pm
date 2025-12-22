@@ -1,8 +1,17 @@
 package Urupam::Utils;
 
-use Mojo::Base -base;
+use strict;
+use warnings;
+use Exporter 'import';
 use Mojo::URL;
 use Mojo::Util qw(url_unescape);
+
+our @EXPORT_OK = qw(
+  sanitize_input
+  get_error_status
+  sanitize_error_message
+  sanitize_url
+);
 
 sub sanitize_input {
     my ($input) = @_;
