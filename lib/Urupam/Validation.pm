@@ -3,44 +3,101 @@ package Urupam::Validation;
 use Mojo::Base -base;
 use Mojo::URL;
 use Mojo::UserAgent;
-use Mojo::Util qw(url_unescape);
 use Mojo::Promise;
+use Urupam::Utils;
 
-my $MAX_URL_LENGTH = 2048;
+my $MAX_URL_LENGTH  = 2048;
+my $CONNECT_TIMEOUT = 10;
+my $REQUEST_TIMEOUT = 10;
+my $MAX_REDIRECTS   = 3;
+
+my $DNS_ERROR_PATTERN =
+qr/Name or service not known|getaddrinfo failed|Could not resolve|DNS|hostname|Name resolution|nodename nor servname provided/i;
+my $SSL_ERROR_PATTERN        = qr/SSL|certificate|TLS|verification failed/i;
+my $CONNECTION_ERROR_PATTERN = qr/Connection refused|Can't connect|timeout/i;
+
+my $PRIVATE_IP_PATTERN =
+  qr/^(127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
 
 my @BLOCKED_DOMAINS = qw(
   localhost 127.0.0.1 0.0.0.0 ::1
 );
 
 has ua => sub {
+    my $self = shift;
     Mojo::UserAgent->new(
-        connect_timeout => 10,
-        request_timeout => 10,
-        max_redirects   => 3,
+        connect_timeout => $self->connect_timeout,
+        request_timeout => $self->request_timeout,
+        max_redirects   => $self->max_redirects,
         insecure        => 0
     );
 };
 
+has connect_timeout => sub { $CONNECT_TIMEOUT };
+has request_timeout => sub { $REQUEST_TIMEOUT };
+has max_redirects   => sub { $MAX_REDIRECTS };
+
 sub _parse_url {
     my ( $self, $url ) = @_;
-    return eval { Mojo::URL->new($url) };
+    return undef unless defined $url;
+    my $parsed;
+    eval { $parsed = Mojo::URL->new($url); 1 } or return undef;
+    return $parsed;
 }
 
-sub is_valid_url {
-    my ( $self, $url ) = @_;
-    return 0 unless defined $url && length($url) > 0;
+sub _classify_error {
+    my ( $self, $err_str ) = @_;
 
-    my $parsed = $self->_parse_url($url);
-    return 0 unless $parsed;
-    return 0 unless $parsed->scheme && $parsed->scheme =~ /^https?$/i;
-    return 0 unless $parsed->host;
+    return 'ssl'        if $err_str =~ $SSL_ERROR_PATTERN;
+    return 'dns'        if $err_str =~ $DNS_ERROR_PATTERN;
+    return 'connection' if $err_str =~ $CONNECTION_ERROR_PATTERN;
+    return 'unknown';
+}
 
-    return 1;
+sub _format_error_message {
+    my ( $self, $error_type, $err_str ) = @_;
+
+    return "SSL certificate error: $err_str" if $error_type eq 'ssl';
+    return "DNS resolution failed: $err_str" if $error_type eq 'dns';
+    return "Cannot reach URL: $err_str"      if $error_type eq 'connection';
+    return "URL validation failed: $err_str";
 }
 
 sub is_valid_url_length {
     my ( $self, $url ) = @_;
-    return defined $url && length($url) <= $MAX_URL_LENGTH;
+    return 0 unless defined $url && length($url) > 0;
+    return length($url) <= $MAX_URL_LENGTH;
+}
+
+sub _is_valid_ipv4 {
+    my ( $self, $ip ) = @_;
+    return 0 unless $ip =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/;
+    my ( $a, $b, $c, $d ) = ( $1, $2, $3, $4 );
+    return
+         $a >= 0
+      && $a <= 255
+      && $b >= 0
+      && $b <= 255
+      && $c >= 0
+      && $c <= 255
+      && $d >= 0
+      && $d <= 255;
+}
+
+sub _is_private_ipv4 {
+    my ( $self, $ip ) = @_;
+    return 0 unless $self->_is_valid_ipv4($ip);
+    return $ip =~ $PRIVATE_IP_PATTERN;
+}
+
+sub _is_private_ipv6 {
+    my ( $self, $ip ) = @_;
+    $ip = lc($ip);
+    $ip =~ s/^\[|\]$//g;
+    return
+         $ip eq '::1'
+      || $ip eq '::'
+      || $ip =~ /^::ffff:(127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
 }
 
 sub is_blocked_url {
@@ -51,14 +108,18 @@ sub is_blocked_url {
     return 0 unless $parsed;
 
     my $host = lc( $parsed->host // '' );
-    $host =~ s/:.*$//;
 
     for my $blocked (@BLOCKED_DOMAINS) {
         return 1 if $host eq $blocked;
     }
 
-    return 1
-      if $host =~ /^(127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
+    if ( $self->_is_private_ipv4($host) ) {
+        return 1;
+    }
+
+    if ( $self->_is_private_ipv6($host) ) {
+        return 1;
+    }
 
     return 0;
 }
@@ -82,15 +143,11 @@ sub check_url_reachable {
         }
     )->catch(
         sub {
-            my $err     = shift;
-            my $err_str = "$err";
-            if ( $err_str =~ /SSL|certificate|TLS/i ) {
-                return Mojo::Promise->reject("SSL certificate error: $err_str");
-            }
-            if ( $err_str =~ /Connection refused|Can't connect|timeout/i ) {
-                return Mojo::Promise->reject("Cannot reach URL: $err_str");
-            }
-            return Mojo::Promise->reject("URL validation failed: $err_str");
+            my $err        = shift;
+            my $err_str    = "$err";
+            my $error_type = $self->_classify_error($err_str);
+            return Mojo::Promise->reject(
+                $self->_format_error_message( $error_type, $err_str ) );
         }
     );
 }
@@ -107,32 +164,24 @@ sub check_ssl_certificate {
 
     return $self->ua->head_p($url)->then( sub { return 1; } )->catch(
         sub {
-            my $err     = shift;
-            my $err_str = "$err";
-            if ( $err_str =~ /SSL|certificate|TLS|verification failed/i ) {
+            my $err        = shift;
+            my $err_str    = "$err";
+            my $error_type = $self->_classify_error($err_str);
+
+            if ( $error_type eq 'ssl' ) {
                 return Mojo::Promise->reject(
                     "Invalid SSL certificate: $err_str");
             }
-            return Mojo::Promise->reject("SSL check failed: $err_str");
+
+            return Mojo::Promise->reject(
+                $self->_format_error_message( $error_type, $err_str ) );
         }
     );
 }
 
-sub is_valid_short_code {
+sub validate_short_code {
     my ( $self, $code ) = @_;
-    return defined $code && length($code) > 0 && $code =~ /^[0-9a-zA-Z]+$/;
-}
-
-sub sanitize_url {
-    my ( $self, $url ) = @_;
-    return undef unless defined $url;
-
-    $url =~ s/^\s+|\s+$//g;
-    $url = url_unescape($url) if $url =~ /%[0-9A-Fa-f]{2}/;
-
-    $url = 'http://' . $url unless $url =~ m{^https?://}i;
-
-    return $url;
+    return defined $code && length($code) > 0 && $code =~ /^[0-9a-zA-Z\-_]+$/;
 }
 
 sub validate_url_with_checks {
@@ -141,18 +190,22 @@ sub validate_url_with_checks {
     return Mojo::Promise->reject('URL is required')
       unless defined $url && length($url) > 0;
 
-    my $sanitized = $self->sanitize_url($url);
+    my $sanitized = Urupam::Utils::sanitize_url($url);
     return Mojo::Promise->reject('Invalid URL format')
-      unless $self->is_valid_url($sanitized);
+      unless defined $sanitized;
+
+    my $parsed = $self->_parse_url($sanitized);
+    return Mojo::Promise->reject('Invalid URL format') unless $parsed;
+    return Mojo::Promise->reject('Invalid URL format')
+      unless $parsed->scheme && $parsed->scheme =~ /^https?$/i;
+    return Mojo::Promise->reject('Invalid URL format') unless $parsed->host;
+
     return Mojo::Promise->reject(
         "URL exceeds maximum length of $MAX_URL_LENGTH characters")
       unless $self->is_valid_url_length($sanitized);
     return Mojo::Promise->reject(
         'This URL cannot be shortened (blocked domain or local address)')
       if $self->is_blocked_url($sanitized);
-
-    my $parsed = $self->_parse_url($sanitized);
-    return Mojo::Promise->reject('Invalid URL format') unless $parsed;
 
     my $ssl_check =
         $parsed->scheme eq 'https'
