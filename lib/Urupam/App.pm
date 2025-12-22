@@ -31,13 +31,6 @@ sub startup {
         }
     );
 
-    $self->helper(
-        get_error_status => sub {
-            my ( $c, $err ) = @_;
-            return Urupam::Utils::get_error_status($err);
-        }
-    );
-
     my $r   = $self->routes;
     my $api = $r->under('/api');
     $api->post('/shorten')->to(
