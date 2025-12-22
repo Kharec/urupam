@@ -2,31 +2,21 @@
 
 `urupam` is a lightweight URL shortener built with Perl and Mojolicious, and backed by Redis.
 
+## Warning
+
+It's a work in progress. API looks good but all the front part remains to do.
+
 ## Basic requirements
 
 - Perl 5.42.0
 - Carton (handles perl deps)
 - Redis
 
-## Roadmap
-
-- [x] create installation script
-- [x] connect to redis + setter and getter operations
-- [ ] create dummy API endpoints
-- [ ] decide how to handle short url generation
-- [ ] avoid collisions in short urls
-- [ ] redirect to the original url
-- [ ] validate URLs and handle errors
-- [ ] create a simple and clean UI
-- [ ] manage/delete short urls
-- [ ] create systemd service
-- [ ] create `Dockerfile`
-- [ ] create `docker-compose.yml`
-- [ ] add unit tests along the way
-
 ## How to run
 
-To run the application in development, you'll first need a Redis server. The easiest way is to start a local Redis instance using Docker:
+To run the application in development, you'll first need a Redis server.
+
+The easiest way is to start a local Redis instance using Docker:
 
 ```sh
 docker run --name mojo-redis -p 6379:6379 -d redis
@@ -44,7 +34,7 @@ Start the application with `morbo`:
 carton exec morbo bin/urupam
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your browser.
+Application will listen on port `3000`.
 
 ## Installation
 
