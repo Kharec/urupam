@@ -4,7 +4,7 @@ use Mojo::Base -base;
 use Mojo::URL;
 use Mojo::UserAgent;
 use Mojo::Promise;
-use Urupam::Utils;
+use Urupam::Utils qw(sanitize_url);
 
 my $MAX_URL_LENGTH  = 2048;
 my $CONNECT_TIMEOUT = 10;
@@ -190,7 +190,7 @@ sub validate_url_with_checks {
     return Mojo::Promise->reject('URL is required')
       unless defined $url && length($url) > 0;
 
-    my $sanitized = Urupam::Utils::sanitize_url($url);
+    my $sanitized = sanitize_url($url);
     return Mojo::Promise->reject('Invalid URL format')
       unless defined $sanitized;
 
