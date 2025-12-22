@@ -1,7 +1,7 @@
 package Urupam::API;
 
 use Mojo::Base 'Mojolicious::Controller';
-use Urupam::Utils;
+use Urupam::Utils qw(sanitize_input get_error_status sanitize_error_message);
 
 sub shorten {
     my $c = shift;
@@ -18,7 +18,7 @@ sub shorten {
         return;
     }
 
-    my $original_url = Urupam::Utils::sanitize_input( $json->{url} || '' );
+    my $original_url = sanitize_input( $json->{url} || '' );
 
     unless ($original_url) {
         $c->render(
@@ -50,8 +50,8 @@ sub shorten {
         sub {
             my $err = shift;
             $c->app->log->error("API URL validation/creation error: $err");
-            my $status          = Urupam::Utils::get_error_status($err);
-            my $sanitized_error = Urupam::Utils::sanitize_error_message($err);
+            my $status          = get_error_status($err);
+            my $sanitized_error = sanitize_error_message($err);
             $c->render(
                 json   => { error => $sanitized_error },
                 status => $status
@@ -100,8 +100,8 @@ sub get_url {
         sub {
             my $err = shift;
             $c->app->log->error("API URL retrieval error: $err");
-            my $status          = Urupam::Utils::get_error_status($err);
-            my $sanitized_error = Urupam::Utils::sanitize_error_message($err);
+            my $status          = get_error_status($err);
+            my $sanitized_error = sanitize_error_message($err);
             $c->render(
                 json   => { error => $sanitized_error },
                 status => $status
