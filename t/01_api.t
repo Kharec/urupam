@@ -3,6 +3,8 @@ use Test::Mojo;
 use Mojo::Promise;
 use Urupam::App;
 
+use_ok('Urupam::API');
+
 package Mock::Validator;
 use Mojo::Base -base;
 

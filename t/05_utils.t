@@ -1,6 +1,8 @@
 use Test::More;
 use Urupam::Utils ();
 
+use_ok('Urupam::Utils');
+
 subtest 'sanitize_input' => sub {
     is( Urupam::Utils::sanitize_input(undef), '', 'undef becomes empty' );
     is( Urupam::Utils::sanitize_input("  spaced out\t\n"),
