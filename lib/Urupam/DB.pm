@@ -33,4 +33,33 @@ sub set {
     return $promise;
 }
 
+sub incr {
+    my ( $self, $key ) = @_;
+    my $promise = Mojo::Promise->new;
+    $self->redis->incr(
+        $key => sub {
+            my ( $redis, $err, $value ) = @_;
+            $err ? $promise->reject($err) : $promise->resolve($value);
+        }
+    );
+    return $promise;
+}
+
+sub exists {
+    my ( $self, $key ) = @_;
+    my $promise = Mojo::Promise->new;
+    $self->redis->exists(
+        $key => sub {
+            my ( $redis, $err, $exists ) = @_;
+            if ($err) {
+                $promise->reject($err);
+            }
+            else {
+                $promise->resolve( $exists ? 1 : 0 );
+            }
+        }
+    );
+    return $promise;
+}
+
 1;
