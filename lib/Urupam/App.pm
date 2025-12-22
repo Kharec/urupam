@@ -2,6 +2,10 @@ package Urupam::App;
 
 use Mojo::Base 'Mojolicious';
 use Urupam::DB;
+use Urupam::URL;
+use Urupam::Validation;
+use Urupam::Utils;
+use Urupam::API;
 
 sub startup {
     my $self = shift;
@@ -13,7 +17,44 @@ sub startup {
         }
     );
 
-    my $r = $self->routes;
+    $self->helper(
+        url_service => sub {
+            my $c = shift;
+            $c->stash->{url_service} ||= Urupam::URL->new( db => $c->db );
+        }
+    );
+
+    $self->helper(
+        validator => sub {
+            my $c = shift;
+            $c->stash->{validator} ||= Urupam::Validation->new;
+        }
+    );
+
+    $self->helper(
+        get_error_status => sub {
+            my ( $c, $err ) = @_;
+            return Urupam::Utils::get_error_status($err);
+        }
+    );
+
+    my $r   = $self->routes;
+    my $api = $r->under('/api');
+    $api->post('/shorten')->to(
+        cb => sub {
+            my $c = shift;
+            bless $c, 'Urupam::API';
+            $c->shorten;
+        }
+    );
+    $api->get('/url')->to(
+        cb => sub {
+            my $c = shift;
+            bless $c, 'Urupam::API';
+            $c->get_url;
+        }
+    );
+
     $r->get('/')->to(
         cb => sub {
             my $c  = shift;
