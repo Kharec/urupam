@@ -62,4 +62,22 @@ sub exists {
     return $promise;
 }
 
+sub setnx {
+    my ( $self, $key, $value ) = @_;
+    my $promise = Mojo::Promise->new;
+    $self->redis->setnx(
+        $key => $value,
+        sub {
+            my ( $redis, $err, $result ) = @_;
+            if ($err) {
+                $promise->reject($err);
+            }
+            else {
+                $promise->resolve( $result ? 1 : 0 );
+            }
+        }
+    );
+    return $promise;
+}
+
 1;
