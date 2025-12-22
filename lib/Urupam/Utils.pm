@@ -15,6 +15,16 @@ sub get_error_status {
     return $err =~ /SSL certificate|Cannot reach|DNS resolution|server error/i ? 422 : 400;
 }
 
+sub sanitize_error_message {
+    my ($err) = @_;
+    return 'An error occurred' unless defined $err;
+    my $sanitized = "$err";
+    $sanitized =~ s/[^\w\s\.\-\:\/]//g;
+    $sanitized =~ s/\s+/ /g;
+    $sanitized =~ s/^\s+|\s+$//g;
+    return length($sanitized) > 200 ? substr($sanitized, 0, 200) . '...' : $sanitized;
+}
+
 sub sanitize_url {
     my ($url) = @_;
     return undef unless defined $url;
