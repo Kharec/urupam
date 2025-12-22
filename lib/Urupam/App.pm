@@ -4,7 +4,6 @@ use Mojo::Base 'Mojolicious';
 use Urupam::DB;
 use Urupam::URL;
 use Urupam::Validation;
-use Urupam::Utils;
 use Urupam::API;
 
 sub startup {
