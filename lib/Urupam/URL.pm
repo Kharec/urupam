@@ -168,10 +168,6 @@ sub create_short_url {
 sub get_original_url {
     my ( $self, $short_code ) = @_;
 
-    unless ( $self->_validate_short_code($short_code) ) {
-        return Mojo::Promise->reject('Invalid short code format');
-    }
-
     return $self->db->get( $URL_PREFIX . $short_code );
 }
 
