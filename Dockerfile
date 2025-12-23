@@ -5,10 +5,7 @@ WORKDIR /opt/urupam
 RUN cpanm --notest Carton
 COPY . ./
 
-RUN rm -rf /opt/urupam/local \
-  && carton install --deployment --without test
-
-COPY bin lib ./
+RUN carton install --deployment --without test
 
 RUN useradd -m -u 10001 urupam \
   && chown -R urupam:urupam /opt/urupam
