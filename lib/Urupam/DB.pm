@@ -80,4 +80,16 @@ sub setnx {
     return $promise;
 }
 
+sub ping {
+    my $self = shift;
+    my $promise = Mojo::Promise->new;
+    $self->redis->ping(
+        sub {
+            my ( $redis, $err, $result ) = @_;
+            $err ? $promise->reject($err) : $promise->resolve($result);
+        }
+    );
+    return $promise;
+}
+
 1;
