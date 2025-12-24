@@ -30,16 +30,38 @@ sub startup {
         }
     );
 
-    my $r   = $self->routes;
-    my $api = $r->under('/api');
-    $api->post('/shorten')->to(
+    my $r = $self->routes;
+
+    $r->get('/health')->to(
+        cb => sub {
+            my $c = shift;
+            $c->render_later;
+            $c->db->ping->then(
+                sub {
+                    $c->render( json => { status => 'ok' } );
+                }
+            )->catch(
+                sub {
+                    my $err = shift;
+                    $c->app->log->error("Health check DB error: $err");
+                    $c->render(
+                        json   => { status => 'error', error => 'Database connection failed' },
+                        status => 503
+                    );
+                }
+            );
+        }
+    );
+
+    my $api_v1 = $r->under('/api/v1');
+    $api_v1->post('/urls')->to(
         cb => sub {
             my $c = shift;
             bless $c, 'Urupam::API';
             $c->shorten;
         }
     );
-    $api->get('/url')->to(
+    $api_v1->get('/urls/:short_code')->to(
         cb => sub {
             my $c = shift;
             bless $c, 'Urupam::API';
@@ -47,37 +69,50 @@ sub startup {
         }
     );
 
-    $r->get('/')->to(
+    $r->get('/:short_code')->to(
         cb => sub {
-            my $c  = shift;
-            my $tx = $c->render_later->tx;
-            my $db = $c->db;
+            my $c = shift;
+            $c->render_later;
+            my $short_code  = $c->param('short_code') // '';
+            my $url_service = $c->url_service;
+            my $validator   = $c->validator;
 
-            $db->set( 'test_key' => '123soleil' )->then(
+            unless ( $short_code
+                && $validator->validate_short_code($short_code) )
+            {
+                $c->render(
+                    json   => { error => 'Invalid short code format' },
+                    status => 400
+                );
+                return;
+            }
+
+            $url_service->get_original_url($short_code)->then(
                 sub {
-                    $c->app->log->info('Value set: test_key => 123soleil');
-                    return $db->get('test_key');
-                }
-            )->then(
-                sub {
-                    my $value = shift;
-                    $c->app->log->info("Value retrieved: $value");
-                    $c->render( json => { status => 'ok', value => $value } );
-                    undef $tx;
+                    my $original_url = shift;
+                    if ($original_url) {
+                        $c->redirect_to($original_url);
+                    }
+                    else {
+                        $c->render(
+                            json   => { error => 'Short code not found' },
+                            status => 404
+                        );
+                    }
                 }
             )->catch(
                 sub {
                     my $err = shift;
-                    $c->app->log->error("DB error: $err");
+                    $c->app->log->error("Redirect lookup error: $err");
                     $c->render(
-                        json   => { status => 'error', message => "$err" },
+                        json   => { error => 'Internal server error' },
                         status => 500
                     );
-                    undef $tx;
                 }
             );
         }
     );
+
 }
 
 1;
