@@ -2,6 +2,9 @@
 use strict;
 use warnings;
 
+use FindBin qw($Bin);
+use lib "$Bin/../lib";
+
 use Urupam::App;
 
 my $app = Urupam::App->new();
