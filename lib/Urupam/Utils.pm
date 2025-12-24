@@ -31,7 +31,7 @@ sub sanitize_error_message {
     my ($err) = @_;
     return 'An error occurred' unless defined $err;
     my $sanitized = "$err";
-    $sanitized =~ s/[^\w\s\.\-\:\/]//g;
+    $sanitized =~ s/[^\p{L}\p{N}_\s\.\-\:\/]//gu;
     $sanitized =~ s/\s+/ /g;
     $sanitized =~ s/^\s+|\s+$//g;
     return
