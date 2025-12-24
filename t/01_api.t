@@ -101,10 +101,10 @@ sub reset_mocks {
     );
 }
 
-subtest 'POST /api/shorten - invalid JSON' => sub {
+subtest 'POST /api/v1/urls - invalid JSON' => sub {
     reset_mocks();
     $t->post_ok(
-        '/api/shorten' => { 'Content-Type' => 'application/json' } =>
+        '/api/v1/urls' => { 'Content-Type' => 'application/json' } =>
           'invalid json' )
       ->status_is(400)
       ->json_is( '/error' => 'Invalid JSON format' );
@@ -112,49 +112,49 @@ subtest 'POST /api/shorten - invalid JSON' => sub {
     ok( !$url_service_called, 'URL service not called for invalid JSON' );
 };
 
-subtest 'POST /api/shorten - invalid JSON types' => sub {
+subtest 'POST /api/v1/urls - invalid JSON types' => sub {
     reset_mocks();
-    $t->post_ok( '/api/shorten' => json => [] )
+    $t->post_ok( '/api/v1/urls' => json => [] )
       ->status_is(400)
       ->json_is( '/error' => 'Invalid JSON format' );
-    $t->post_ok( '/api/shorten' => json => 'not a hash' )
+    $t->post_ok( '/api/v1/urls' => json => 'not a hash' )
       ->status_is(400)
       ->json_is( '/error' => 'Invalid JSON format' );
     ok( !$validator_called,   'Validator not called for invalid JSON types' );
     ok( !$url_service_called, 'URL service not called for invalid JSON types' );
 };
 
-subtest 'POST /api/shorten - missing URL' => sub {
+subtest 'POST /api/v1/urls - missing URL' => sub {
     reset_mocks();
-    $t->post_ok( '/api/shorten' => json => {} )
+    $t->post_ok( '/api/v1/urls' => json => {} )
       ->status_is(400)
       ->json_is( '/error' => 'URL is required' );
     ok( !$validator_called,   'Validator not called for missing URL' );
     ok( !$url_service_called, 'URL service not called for missing URL' );
 };
 
-subtest 'POST /api/shorten - whitespace URL' => sub {
+subtest 'POST /api/v1/urls - whitespace URL' => sub {
     reset_mocks();
-    $t->post_ok( '/api/shorten' => json => { url => '   ' } )
+    $t->post_ok( '/api/v1/urls' => json => { url => '   ' } )
       ->status_is(400)
       ->json_is( '/error' => 'URL is required' );
     ok( !$validator_called,   'Validator not called for whitespace URL' );
     ok( !$url_service_called, 'URL service not called for whitespace URL' );
 };
 
-subtest 'POST /api/shorten - whitespace-only with tabs/newlines' => sub {
+subtest 'POST /api/v1/urls - whitespace-only with tabs/newlines' => sub {
     reset_mocks();
-    $t->post_ok( '/api/shorten' => json => { url => "\n\t " } )
+    $t->post_ok( '/api/v1/urls' => json => { url => "\n\t " } )
       ->status_is(400)
       ->json_is( '/error' => 'URL is required' );
     ok( !$validator_called,   'Validator not called for tab/newline URL' );
     ok( !$url_service_called, 'URL service not called for tab/newline URL' );
 };
 
-subtest 'POST /api/shorten - success path' => sub {
+subtest 'POST /api/v1/urls - success path' => sub {
     reset_mocks();
     my $tx = $t->post_ok(
-        '/api/shorten' => json => { url => '  https://example.com/path  ' } );
+        '/api/v1/urls' => json => { url => '  https://example.com/path  ' } );
     my $base_url = $t->ua->server->url->clone->path('')->to_abs;
     $tx->status_is(200)->json_is( '/success' => 1 );
     $tx->json_is( '/short_code'   => 'AbCdEf123456' );
@@ -167,7 +167,7 @@ subtest 'POST /api/shorten - success path' => sub {
     is( $created_url, 'https://example.com/path', 'URL passed to URL service' );
 };
 
-subtest 'POST /api/shorten - validator normalization' => sub {
+subtest 'POST /api/v1/urls - validator normalization' => sub {
     reset_mocks();
     $validator->validate_url_cb(
         sub {
@@ -175,14 +175,14 @@ subtest 'POST /api/shorten - validator normalization' => sub {
             return Mojo::Promise->resolve('http://normalized.test/path');
         }
     );
-    $t->post_ok( '/api/shorten' => json => { url => 'normalized.test/path' } )
+    $t->post_ok( '/api/v1/urls' => json => { url => 'normalized.test/path' } )
       ->status_is(200)
       ->json_is( '/short_code' => 'AbCdEf123456' );
     is( $created_url, 'http://normalized.test/path',
         'URL service receives normalized URL' );
 };
 
-subtest 'POST /api/shorten - validator error' => sub {
+subtest 'POST /api/v1/urls - validator error' => sub {
     reset_mocks();
     $validator->validate_url_cb(
         sub {
@@ -190,14 +190,14 @@ subtest 'POST /api/shorten - validator error' => sub {
             return Mojo::Promise->reject('SSL certificate error: bad cert');
         }
     );
-    $t->post_ok( '/api/shorten' => json => { url => 'https://example.com' } )
+    $t->post_ok( '/api/v1/urls' => json => { url => 'https://example.com' } )
       ->status_is(422)
       ->json_is( '/error' => 'SSL certificate error: bad cert' );
     ok( $validator_called,    'Validator called' );
     ok( !$url_service_called, 'URL service not called after validator error' );
 };
 
-subtest 'POST /api/shorten - error sanitization' => sub {
+subtest 'POST /api/v1/urls - error sanitization' => sub {
     reset_mocks();
     $url_service->create_short_url_cb(
         sub {
@@ -205,14 +205,14 @@ subtest 'POST /api/shorten - error sanitization' => sub {
             return Mojo::Promise->reject("Database error: <bad>\n\t!!");
         }
     );
-    $t->post_ok( '/api/shorten' => json => { url => 'https://example.com' } )
+    $t->post_ok( '/api/v1/urls' => json => { url => 'https://example.com' } )
       ->status_is(400)
       ->json_is( '/error' => 'Database error: bad' );
     ok( $validator_called,   'Validator called' );
     ok( $url_service_called, 'URL service called' );
 };
 
-subtest 'POST /api/shorten - error sanitization truncation' => sub {
+subtest 'POST /api/v1/urls - error sanitization truncation' => sub {
     reset_mocks();
     my $long_error = 'Database error: ' . ( 'a' x 210 );
     my $expected   = substr( $long_error, 0, 200 ) . '...';
@@ -222,14 +222,14 @@ subtest 'POST /api/shorten - error sanitization truncation' => sub {
             return Mojo::Promise->reject($long_error);
         }
     );
-    $t->post_ok( '/api/shorten' => json => { url => 'https://example.com' } )
+    $t->post_ok( '/api/v1/urls' => json => { url => 'https://example.com' } )
       ->status_is(400)
       ->json_is( '/error' => $expected );
     ok( $validator_called,   'Validator called' );
     ok( $url_service_called, 'URL service called' );
 };
 
-subtest 'POST /api/shorten - URL service error' => sub {
+subtest 'POST /api/v1/urls - URL service error' => sub {
     reset_mocks();
     $url_service->create_short_url_cb(
         sub {
@@ -237,14 +237,14 @@ subtest 'POST /api/shorten - URL service error' => sub {
             return Mojo::Promise->reject('Database error: connection failed');
         }
     );
-    $t->post_ok( '/api/shorten' => json => { url => 'https://example.com' } )
+    $t->post_ok( '/api/v1/urls' => json => { url => 'https://example.com' } )
       ->status_is(400)
       ->json_is( '/error' => 'Database error: connection failed' );
     ok( $validator_called,   'Validator called' );
     ok( $url_service_called, 'URL service called' );
 };
 
-subtest 'POST /api/shorten - status mapping for network error' => sub {
+subtest 'POST /api/v1/urls - status mapping for network error' => sub {
     reset_mocks();
     $validator->validate_url_cb(
         sub {
@@ -253,39 +253,35 @@ subtest 'POST /api/shorten - status mapping for network error' => sub {
                 'Cannot reach URL: Connection refused');
         }
     );
-    $t->post_ok( '/api/shorten' => json => { url => 'https://example.com' } )
+    $t->post_ok( '/api/v1/urls' => json => { url => 'https://example.com' } )
       ->status_is(422)
       ->json_is( '/error' => 'Cannot reach URL: Connection refused' );
     ok( $validator_called,    'Validator called' );
     ok( !$url_service_called, 'URL service not called after validator error' );
 };
 
-subtest 'GET /api/url - invalid short code format' => sub {
+subtest 'GET /api/v1/urls/:short_code - invalid short code format' => sub {
     reset_mocks();
     $validator->validate_short_code_cb( sub { 0 } );
-    $t->get_ok('/api/url?short_code=bad@code')
+    $t->get_ok('/api/v1/urls/bad@code')
       ->status_is(400)
       ->json_is( '/error' => 'Invalid short code format' );
     ok( !$url_service_called, 'URL service not called for invalid short code' );
 };
 
-subtest 'GET /api/url - missing short_code param' => sub {
+subtest 'GET /api/v1/urls - missing short_code param' => sub {
     reset_mocks();
-    $t->get_ok('/api/url')
-      ->status_is(400)
-      ->json_is( '/error' => 'Invalid short code format' );
+    $t->get_ok('/api/v1/urls')->status_is(404);
     ok( !$url_service_called, 'URL service not called for missing short_code' );
 };
 
-subtest 'GET /api/url - empty short_code param' => sub {
+subtest 'GET /api/v1/urls/:short_code - empty short_code param' => sub {
     reset_mocks();
-    $t->get_ok('/api/url?short_code=')
-      ->status_is(400)
-      ->json_is( '/error' => 'Invalid short code format' );
+    $t->get_ok('/api/v1/urls/')->status_is(404);
     ok( !$url_service_called, 'URL service not called for empty short_code' );
 };
 
-subtest 'GET /api/url - not found' => sub {
+subtest 'GET /api/v1/urls/:short_code - not found' => sub {
     reset_mocks();
     $url_service->get_original_url_cb(
         sub {
@@ -293,16 +289,16 @@ subtest 'GET /api/url - not found' => sub {
             return Mojo::Promise->resolve(undef);
         }
     );
-    $t->get_ok('/api/url?short_code=AbCdEf123456')
+    $t->get_ok('/api/v1/urls/AbCdEf123456')
       ->status_is(404)
       ->json_is( '/error' => 'Short code not found' );
     ok( $url_service_called, 'URL service called' );
 };
 
-subtest 'GET /api/url - success path' => sub {
+subtest 'GET /api/v1/urls/:short_code - success path' => sub {
     reset_mocks();
     my $base_url = $t->ua->server->url->clone->path('')->to_abs;
-    $t->get_ok('/api/url?short_code=AbCdEf123456')
+    $t->get_ok('/api/v1/urls/AbCdEf123456')
       ->status_is(200)
       ->json_is( '/success'      => 1 )
       ->json_is( '/short_code'   => 'AbCdEf123456' )
@@ -313,7 +309,7 @@ subtest 'GET /api/url - success path' => sub {
     is( $get_code,       'AbCdEf123456', 'Short code passed to URL service' );
 };
 
-subtest 'GET /api/url - URL service error' => sub {
+subtest 'GET /api/v1/urls/:short_code - URL service error' => sub {
     reset_mocks();
     $url_service->get_original_url_cb(
         sub {
@@ -321,13 +317,13 @@ subtest 'GET /api/url - URL service error' => sub {
             return Mojo::Promise->reject('DNS resolution failed: timeout');
         }
     );
-    $t->get_ok('/api/url?short_code=AbCdEf123456')
+    $t->get_ok('/api/v1/urls/AbCdEf123456')
       ->status_is(422)
       ->json_is( '/error' => 'DNS resolution failed: timeout' );
     ok( $url_service_called, 'URL service called' );
 };
 
-subtest 'GET /api/url - non-422 error mapping' => sub {
+subtest 'GET /api/v1/urls/:short_code - non-422 error mapping' => sub {
     reset_mocks();
     $url_service->get_original_url_cb(
         sub {
@@ -335,7 +331,7 @@ subtest 'GET /api/url - non-422 error mapping' => sub {
             return Mojo::Promise->reject('Database error: connection failed');
         }
     );
-    $t->get_ok('/api/url?short_code=AbCdEf123456')
+    $t->get_ok('/api/v1/urls/AbCdEf123456')
       ->status_is(400)
       ->json_is( '/error' => 'Database error: connection failed' );
     ok( $url_service_called, 'URL service called' );
