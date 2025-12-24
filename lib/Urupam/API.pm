@@ -28,9 +28,11 @@ sub shorten {
         return;
     }
 
+    my $normalized_url;
     $validator->validate_url_with_checks($original_url)->then(
         sub {
             my $sanitized_url = shift;
+            $normalized_url = $sanitized_url;
             return $url_service->create_short_url($sanitized_url);
         }
     )->then(
@@ -42,7 +44,7 @@ sub shorten {
                     success      => 1,
                     short_url    => $short_url,
                     short_code   => $short_code,
-                    original_url => $original_url
+                    original_url => $normalized_url
                 }
             );
         }
