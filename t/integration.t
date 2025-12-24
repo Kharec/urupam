@@ -18,23 +18,29 @@ sub validate_short_code_format {
 
 sub post_shorten {
     my ($url) = @_;
-    my $tx = $t->post_ok( '/api/shorten' => json => { url => $url } );
+    my $tx = $t->post_ok( '/api/v1/urls' => json => { url => $url } );
+    my $json = $tx->tx->res->json;
+    my $error =
+      ref $json eq 'HASH' ? ( $json->{error} // '' ) : '';
     return {
         tx    => $tx,
         code  => $tx->tx->res->code,
-        json  => $tx->tx->res->json,
-        error => $tx->tx->res->json->{error} // '',
+        json  => $json,
+        error => $error,
     };
 }
 
 sub get_url {
     my ($code) = @_;
-    my $tx = $t->get_ok("/api/url?short_code=$code");
+    my $tx = $t->get_ok("/api/v1/urls/$code");
+    my $json = $tx->tx->res->json;
+    my $error =
+      ref $json eq 'HASH' ? ( $json->{error} // '' ) : '';
     return {
         tx    => $tx,
         code  => $tx->tx->res->code,
-        json  => $tx->tx->res->json,
-        error => $tx->tx->res->json->{error} // '',
+        json  => $json,
+        error => $error,
     };
 }
 
@@ -84,7 +90,7 @@ sub skip_if_error {
     return 0;
 }
 
-subtest 'POST /api/shorten - Real validator success cases' => sub {
+subtest 'POST /api/v1/urls - Real validator success cases' => sub {
     for my $url ( 'https://www.example.com', 'http://www.perl.org' ) {
         my $res = post_shorten($url);
         if ( $res->{code} == 200 ) {
@@ -96,7 +102,7 @@ subtest 'POST /api/shorten - Real validator success cases' => sub {
     }
 };
 
-subtest 'POST /api/shorten - Real validator URL normalization' => sub {
+subtest 'POST /api/v1/urls - Real validator URL normalization' => sub {
     for my $input ( 'www.example.com', 'example.com' ) {
         my $res = post_shorten($input);
         if ( $res->{code} == 200 ) {
@@ -111,7 +117,7 @@ subtest 'POST /api/shorten - Real validator URL normalization' => sub {
     }
 };
 
-subtest 'POST /api/shorten - Real validator blocked domains' => sub {
+subtest 'POST /api/v1/urls - Real validator blocked domains' => sub {
     for my $url (
         'http://localhost', 'https://localhost',
         'http://127.0.0.1', 'http://192.168.1.1',
@@ -128,7 +134,7 @@ subtest 'POST /api/shorten - Real validator blocked domains' => sub {
     }
 };
 
-subtest 'POST /api/shorten - Real validator network errors (422)' => sub {
+subtest 'POST /api/v1/urls - Real validator network errors (422)' => sub {
     for my $case (
         {
             url   => 'http://nonexistent-domain-12345.invalid',
@@ -152,7 +158,7 @@ subtest 'POST /api/shorten - Real validator network errors (422)' => sub {
     }
 };
 
-subtest 'POST /api/shorten - Real validator SSL certificate validation' => sub {
+subtest 'POST /api/v1/urls - Real validator SSL certificate validation' => sub {
     my $res = post_shorten('https://www.example.com');
     if ( $res->{code} == 200 ) {
         pass('HTTPS URL with valid SSL certificate accepted');
@@ -165,10 +171,9 @@ subtest 'POST /api/shorten - Real validator SSL certificate validation' => sub {
     }
 };
 
-subtest 'POST /api/shorten - Real validator invalid URL format' => sub {
+subtest 'POST /api/v1/urls - Real validator invalid URL format' => sub {
     for my $case (
         { url => 'ftp://example.com', error => 'Invalid URL format' },
-        { url => 'not-a-url',         error => 'Invalid URL format' },
         { url => '',                  error => 'URL is required' },
       )
     {
@@ -176,11 +181,20 @@ subtest 'POST /api/shorten - Real validator invalid URL format' => sub {
         is( $res->{code},  400, "Invalid URL rejected: $case->{url}" );
         is( $res->{error}, $case->{error}, "Correct error for: $case->{url}" );
     }
+
+    my $res = post_shorten('not-a-url');
+    is( $res->{code}, 422, 'Unreachable host rejected: not-a-url' );
+    like(
+        $res->{error},
+        qr/Cannot reach URL|DNS resolution failed|URL validation failed/,
+        'Correct error for: not-a-url'
+    );
 };
 
-subtest 'POST /api/shorten - Real validator URL length validation' => sub {
+subtest 'POST /api/v1/urls - Real validator URL length validation' => sub {
+    my $base         = 'https://www.example.com/';
     my $too_long_url =
-      'https://www.example.com/' . ( 'a' x ( $MAX_URL_LENGTH - 25 ) );
+      $base . ( 'a' x ( $MAX_URL_LENGTH - length($base) + 1 ) );
     my $res = post_shorten($too_long_url);
     is( $res->{code}, 400, 'URL exceeding maximum length rejected' );
     like(
@@ -190,7 +204,7 @@ subtest 'POST /api/shorten - Real validator URL length validation' => sub {
     );
 };
 
-subtest 'POST /api/shorten - Real validator URL edge cases' => sub {
+subtest 'POST /api/v1/urls - Real validator URL edge cases' => sub {
     for my $url (
         'https://www.example.com?foo=bar',
         'https://www.example.com#section',
@@ -211,7 +225,7 @@ subtest 'POST /api/shorten - Real validator URL edge cases' => sub {
     }
 };
 
-subtest 'POST /api/shorten - Real database persistence and retrieval' => sub {
+subtest 'POST /api/v1/urls - Real database persistence and retrieval' => sub {
     my $url  = 'https://www.example.com';
     my $res1 = post_shorten($url);
 
@@ -233,7 +247,7 @@ subtest 'POST /api/shorten - Real database persistence and retrieval' => sub {
     }
 };
 
-subtest 'POST /api/shorten - Real database duplicate URL handling' => sub {
+subtest 'POST /api/v1/urls - Real database duplicate URL handling' => sub {
     my $url  = 'https://www.example.com';
     my $res1 = post_shorten($url);
 
@@ -267,7 +281,7 @@ subtest 'POST /api/shorten - Real database duplicate URL handling' => sub {
     }
 };
 
-subtest 'GET /api/url - Real database error cases' => sub {
+subtest 'GET /api/v1/urls/:short_code - Real database error cases' => sub {
     my $res = get_url('nonexistent123456');
     is( $res->{code}, 404, 'Non-existent code returns 404' );
     is(
@@ -276,15 +290,13 @@ subtest 'GET /api/url - Real database error cases' => sub {
         'Correct error message for non-existent code'
     );
 
-    for my $case (
-        { code => '',             error => 'Invalid short code format' },
-        { code => 'invalid@code', error => 'Invalid short code format' },
-      )
-    {
-        $res = get_url( $case->{code} );
-        is( $res->{code},  400, "Invalid format rejected: $case->{code}" );
-        is( $res->{error}, $case->{error}, "Correct error for: $case->{code}" );
-    }
+    $res = get_url('');
+    is( $res->{code}, 404, 'Missing short code returns 404' );
+
+    $res = get_url('invalid@code');
+    is( $res->{code}, 400, 'Invalid format rejected: invalid@code' );
+    is( $res->{error}, 'Invalid short code format',
+        'Correct error for: invalid@code' );
 };
 
 subtest 'End-to-end: Full flow with real components' => sub {
