@@ -45,10 +45,21 @@ sub startup {
                     my $err = shift;
                     $c->app->log->error("Health check DB error: $err");
                     $c->render(
-                        json   => { status => 'error', error => 'Database connection failed' },
+                        json => {
+                            status => 'error',
+                            error  => 'Database connection failed'
+                        },
                         status => 503
                     );
                 }
+            );
+        }
+    );
+    $r->get('/')->to(
+        cb => sub {
+            my $c = shift;
+            $c->render(
+                json => { status => 'hello from urupam', service => 'urupam' }
             );
         }
     );
