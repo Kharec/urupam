@@ -20,6 +20,18 @@ services:
       - "8080:8080"
     environment:
       - REDIS_URL=redis://redis:6379
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "perl",
+          "-MHTTP::Tiny",
+          "-e",
+          "exit(HTTP::Tiny->new->get(\"http://localhost:8080/health\")->{success}?0:1)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       redis:
         condition: service_healthy
