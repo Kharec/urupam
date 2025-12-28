@@ -71,6 +71,7 @@ sub is_valid_url_length {
 
 sub _is_valid_ipv4 {
     my ( $self, $ip ) = @_;
+    return 0 unless defined $ip;
     return 0 unless $ip =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/;
     my ( $a, $b, $c, $d ) = ( $1, $2, $3, $4 );
     return
