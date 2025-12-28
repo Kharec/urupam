@@ -1,100 +1,6 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Urupam - URL Shortener</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            line-height: 1.6;
-            color: #222;
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-        h1 {
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-            color: #444;
-            text-align: center;
-        }
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
-        label {
-            display: block;
-            margin-bottom: 0.5rem;
-            color: #444;
-            font-weight: 500;
-        }
-        input[type="url"] {
-            width: 100%;
-            padding: 0.75rem;
-            font-size: 1rem;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        input[type="url"]:focus {
-            outline: none;
-            border-color: #444;
-        }
-        button {
-            width: 100%;
-            padding: 0.75rem;
-            font-size: 1rem;
-            background-color: #444;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        button:hover {
-            background-color: #333;
-        }
-        button:disabled {
-            background-color: #999;
-            cursor: not-allowed;
-        }
-        .result {
-            margin-top: 2rem;
-            padding: 1rem;
-            border-radius: 4px;
-            display: none;
-        }
-        .result.success {
-            background-color: #e8f5e9;
-            border: 1px solid #4caf50;
-            color: #2e7d32;
-        }
-        .result.error {
-            background-color: #ffebee;
-            border: 1px solid #f44336;
-            color: #c62828;
-        }
-        .result.show {
-            display: block;
-        }
-        .short-url {
-            word-break: break-all;
-            font-weight: 500;
-            margin-top: 0.5rem;
-        }
-        .short-url a {
-            color: #2e7d32;
-            text-decoration: none;
-        }
-        .short-url a:hover {
-            text-decoration: underline;
-        }
-        .error-message {
-            margin-top: 0.5rem;
-        }
-    </style>
-</head>
-<body>
+% layout 'default';
+% stash title => 'Urupam - URL Shortener';
+<main class="page">
     <h1>Urupam</h1>
     <form id="shorten-form">
         <div class="form-group">
@@ -132,13 +38,21 @@
                     body: JSON.stringify({ url: url })
                 });
 
-                const data = await response.json();
+                const contentType = response.headers.get('content-type') || '';
+                let data = {};
+                if (contentType.includes('application/json')) {
+                    data = await response.json();
+                } else {
+                    const text = await response.text();
+                    data = { error: text || 'Unexpected response' };
+                }
 
                 if (response.ok && data.success) {
                     showSuccess(data.short_url, data.original_url);
                     urlInput.value = '';
                 } else {
-                    showError(data.error || 'An error occurred');
+                    const message = data.error || `Request failed (${response.status})`;
+                    showError(message);
                 }
             } catch (error) {
                 showError('Network error: ' + error.message);
@@ -176,5 +90,4 @@
             return div.innerHTML;
         }
     </script>
-</body>
-</html>
+</main>
