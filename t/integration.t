@@ -209,7 +209,7 @@ subtest 'POST /api/v1/urls - Real validator URL edge cases' => sub {
         'https://www.example.com?foo=bar',
         'https://www.example.com#section',
         'https://www.example.com:443',
-        'https://www.example.com/path/to/resource',
+        'https://www.perl.org/about.html',
       )
     {
         my $res = post_shorten($url);
