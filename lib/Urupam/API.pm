@@ -29,7 +29,7 @@ sub shorten {
     }
 
     my $normalized_url;
-    $validator->validate_url_with_checks($original_url)->then(
+    return $validator->validate_url_with_checks($original_url)->then(
         sub {
             my $sanitized_url = shift;
             $normalized_url = $sanitized_url;
@@ -38,7 +38,8 @@ sub shorten {
     )->then(
         sub {
             my $short_code = shift;
-            my $short_url  = $c->url_for("/$short_code")->to_abs;
+            return if $c->stash->{rendered};
+            my $short_url = $c->url_for("/$short_code")->to_abs;
             $c->render(
                 json => {
                     success      => 1,
@@ -51,6 +52,7 @@ sub shorten {
     )->catch(
         sub {
             my $err = shift;
+            return if $c->stash->{rendered};
             $c->app->log->error("API URL validation/creation error: $err");
             my $status          = get_error_status($err);
             my $sanitized_error = sanitize_error_message($err);
@@ -77,9 +79,10 @@ sub get_url {
         return;
     }
 
-    $url_service->get_original_url($short_code)->then(
+    return $url_service->get_original_url($short_code)->then(
         sub {
             my $original_url = shift;
+            return if $c->stash->{rendered};
             if ($original_url) {
                 my $short_url = $c->url_for("/$short_code")->to_abs;
                 $c->render(
@@ -101,6 +104,7 @@ sub get_url {
     )->catch(
         sub {
             my $err = shift;
+            return if $c->stash->{rendered};
             $c->app->log->error("API URL retrieval error: $err");
             my $status          = get_error_status($err);
             my $sanitized_error = sanitize_error_message($err);
