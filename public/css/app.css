@@ -15,6 +15,10 @@ body {
     max-width: 600px;
     margin: 0 auto;
     padding: 2rem;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .page-center {
@@ -48,6 +52,11 @@ p {
 
 .form-group {
     margin-bottom: 1.5rem;
+}
+
+#shorten-form {
+    max-width: 420px;
+    margin: 0 auto;
 }
 
 label {
