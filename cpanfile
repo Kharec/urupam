@@ -9,4 +9,5 @@ requires 'Mojolicious';
 on test => sub {
     requires 'Test::Mojo';
     requires 'Test::More';
+    requires 'Test::MockObject';
 };
