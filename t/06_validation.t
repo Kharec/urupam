@@ -1,0 +1,509 @@
+use Test::More;
+use Test::MockObject;
+use Mojo::Promise;
+use Urupam::Validation;
+
+use_ok('Urupam::Validation');
+
+my $validator = Urupam::Validation->new;
+
+sub wait_promise {
+    my ($promise) = @_;
+    my ( $value, $error );
+    $promise->then( sub { $value = shift } )
+      ->catch( sub { $error = shift } )
+      ->wait;
+    return ( $value, $error );
+}
+
+sub mock_ua_with_code {
+    my ($code)      = @_;
+    my $mock_ua     = Test::MockObject->new;
+    my $mock_tx     = Test::MockObject->new;
+    my $mock_result = Test::MockObject->new;
+
+    $mock_result->mock( 'code', sub { $code } );
+    $mock_tx->mock( 'result', sub { $mock_result } );
+    $mock_ua->mock(
+        'head_p',
+        sub {
+            return Mojo::Promise->resolve($mock_tx);
+        }
+    );
+
+    return $mock_ua;
+}
+
+sub mock_ua_with_error {
+    my ($error) = @_;
+    my $mock_ua = Test::MockObject->new;
+    $mock_ua->mock(
+        'head_p',
+        sub {
+            return Mojo::Promise->reject($error);
+        }
+    );
+    return $mock_ua;
+}
+
+subtest 'is_valid_url_length' => sub {
+    ok( $validator->is_valid_url_length('http://example.com'),
+        'valid URL length passes' );
+    ok( !$validator->is_valid_url_length(undef), 'undef fails length check' );
+    ok(
+        !$validator->is_valid_url_length(''),
+        'empty string fails length check'
+    );
+    ok( $validator->is_valid_url_length( 'a' x 2048 ),
+        'exactly 2048 characters passes' );
+    ok( !$validator->is_valid_url_length( 'a' x 2049 ),
+        '2049 characters fails' );
+    ok(
+        $validator->is_valid_url_length(
+            'http://example.com/' . ( 'a' x 2000 )
+        ),
+        'long URL within limit passes'
+    );
+};
+
+subtest '_classify_error' => sub {
+    is( $validator->_classify_error('SSL certificate verification failed'),
+        'ssl', 'classifies SSL errors' );
+    is( $validator->_classify_error('Name or service not known'),
+        'dns', 'classifies DNS errors' );
+    is( $validator->_classify_error('Connection refused'),
+        'connection', 'classifies connection errors' );
+    is( $validator->_classify_error('unexpected failure'),
+        'unknown', 'classifies unknown errors' );
+};
+
+subtest '_format_error_message' => sub {
+    is(
+        $validator->_format_error_message( 'ssl', 'bad cert' ),
+        'SSL certificate error: bad cert',
+        'formats SSL errors'
+    );
+    is(
+        $validator->_format_error_message( 'dns', 'timeout' ),
+        'DNS resolution failed: timeout',
+        'formats DNS errors'
+    );
+    is(
+        $validator->_format_error_message( 'connection', 'refused' ),
+        'Cannot reach URL: refused',
+        'formats connection errors'
+    );
+    is(
+        $validator->_format_error_message( 'unknown', 'oops' ),
+        'URL validation failed: oops',
+        'formats unknown errors'
+    );
+};
+
+subtest '_is_valid_ipv4' => sub {
+    my @valid = (
+        [ '192.168.1.1',     'valid IPv4 passes' ],
+        [ '0.0.0.0',         '0.0.0.0 is valid' ],
+        [ '255.255.255.255', '255.255.255.255 is valid' ],
+    );
+    my @invalid = (
+        [ '256.1.1.1',         'octet > 255 fails' ],
+        [ '192.168.1',         'missing octet fails' ],
+        [ '192.168.1.1.1',     'extra octet fails' ],
+        [ 'not.an.ip.address', 'non-numeric fails' ],
+        [ '192.168.-1.1',      'negative octet fails' ],
+    );
+
+    for my $case (@valid) {
+        ok( $validator->_is_valid_ipv4( $case->[0] ), $case->[1] );
+    }
+
+    for my $case (@invalid) {
+        ok( !$validator->_is_valid_ipv4( $case->[0] ), $case->[1] );
+    }
+
+    ok( !$validator->_is_valid_ipv4(undef), 'undef fails' );
+};
+
+subtest '_is_private_ipv4' => sub {
+    my @private = (
+        [ '127.0.0.1',      '127.0.0.1 is private' ],
+        [ '192.168.1.1',    '192.168.x.x is private' ],
+        [ '10.0.0.1',       '10.x.x.x is private' ],
+        [ '172.16.0.1',     '172.16.x.x is private' ],
+        [ '172.31.255.255', '172.31.x.x is private' ],
+    );
+    my @public = (
+        [ '172.15.0.1', '172.15.x.x is not private' ],
+        [ '172.32.0.1', '172.32.x.x is not private' ],
+        [ '8.8.8.8',    '8.8.8.8 is not private' ],
+        [ 'invalid',    'invalid IP is not private' ],
+    );
+
+    for my $case (@private) {
+        ok( $validator->_is_private_ipv4( $case->[0] ), $case->[1] );
+    }
+
+    for my $case (@public) {
+        ok( !$validator->_is_private_ipv4( $case->[0] ), $case->[1] );
+    }
+};
+
+subtest '_is_private_ipv6' => sub {
+    my @private = (
+        [ '::1',                '::1 is private' ],
+        [ '[::1]',              '[::1] is private' ],
+        [ '::',                 ':: is private' ],
+        [ '::ffff:127.0.0.1',   '::ffff:127.0.0.1 is private' ],
+        [ '::ffff:192.168.1.1', '::ffff:192.168.1.1 is private' ],
+        [ '::ffff:10.0.0.1',    '::ffff:10.0.0.1 is private' ],
+        [ '::ffff:172.16.0.1',  '::ffff:172.16.0.1 is private' ],
+    );
+    my @public = (
+        [ '2001:db8::1',    '2001:db8::1 is not private' ],
+        [ '::ffff:8.8.8.8', '::ffff:8.8.8.8 is not private' ],
+        [ 'invalid',        'invalid IPv6 is not private' ],
+    );
+
+    for my $case (@private) {
+        ok( $validator->_is_private_ipv6( $case->[0] ), $case->[1] );
+    }
+
+    for my $case (@public) {
+        ok( !$validator->_is_private_ipv6( $case->[0] ), $case->[1] );
+    }
+};
+
+subtest 'is_blocked_url' => sub {
+    my @blocked = (
+        [ 'http://localhost/path',   'localhost is blocked' ],
+        [ 'http://127.0.0.1/path',   '127.0.0.1 is blocked' ],
+        [ 'http://0.0.0.0/path',     '0.0.0.0 is blocked' ],
+        [ 'http://[::1]/path',       '::1 is blocked' ],
+        [ 'http://[::]/path',        ':: is blocked' ],
+        [ 'http://192.168.1.1/path', '192.168.1.1 is blocked' ],
+        [ 'http://10.0.0.1/path',    '10.0.0.1 is blocked' ],
+        [ 'http://172.16.0.1/path',  '172.16.0.1 is blocked' ],
+    );
+    my @allowed = (
+        [ 'http://example.com/path', 'public domain is not blocked' ],
+        [ 'http://8.8.8.8/path',     'public IP is not blocked' ],
+        [ 'invalid url',             'invalid URL is not blocked' ],
+        [ undef,                     'undef is not blocked' ],
+    );
+
+    for my $case (@blocked) {
+        ok( $validator->is_blocked_url( $case->[0] ), $case->[1] );
+    }
+
+    for my $case (@allowed) {
+        ok( !$validator->is_blocked_url( $case->[0] ), $case->[1] );
+    }
+};
+
+subtest 'validate_short_code' => sub {
+    my @valid = (
+        [ 'abc123',  'alphanumeric code passes' ],
+        [ 'ABC123',  'uppercase code passes' ],
+        [ 'abc-123', 'code with dash passes' ],
+        [ 'abc_123', 'code with underscore passes' ],
+        [ 'a',       'single character passes' ],
+    );
+    my @invalid = (
+        [ 'abc@123', 'code with @ fails' ],
+        [ 'abc.123', 'code with dot fails' ],
+        [ 'abc 123', 'code with space fails' ],
+        [ '',        'empty code fails' ],
+        [ undef,     'undef code fails' ],
+    );
+
+    for my $case (@valid) {
+        ok( $validator->validate_short_code( $case->[0] ), $case->[1] );
+    }
+
+    for my $case (@invalid) {
+        ok( !$validator->validate_short_code( $case->[0] ), $case->[1] );
+    }
+};
+
+subtest 'check_url_reachable - success codes' => sub {
+    for my $code ( 200, 201, 301 ) {
+        $validator->ua( mock_ua_with_code($code) );
+        my ( $result, $error ) =
+          wait_promise( $validator->check_url_reachable('http://example.com') );
+        is( $result, 1,     "$code status returns 1" );
+        is( $error,  undef, "$code status has no error" );
+    }
+};
+
+subtest 'check_url_reachable - error codes' => sub {
+    my @cases = (
+        [ 404, qr/URL returned 404 error/, '4xx status returns error' ],
+        [ 500, qr/URL returned 500 error/, '5xx status returns error' ],
+        [ 100, qr/unexpected status/,      'unexpected status returns error' ],
+    );
+
+    for my $case (@cases) {
+        $validator->ua( mock_ua_with_code( $case->[0] ) );
+        my ( $result, $error ) =
+          wait_promise( $validator->check_url_reachable('http://example.com') );
+        is( $result, undef, "$case->[0] status has no result" );
+        like( $error, $case->[1], $case->[2] );
+    }
+};
+
+subtest 'check_url_reachable - classified errors' => sub {
+    my @cases = (
+        [
+            'Name or service not known',
+            qr/DNS resolution failed/,
+            'DNS error is classified'
+        ],
+        [
+            'SSL certificate verification failed',
+            qr/SSL certificate error/,
+            'SSL error is classified'
+        ],
+        [
+            'Connection refused',
+            qr/Cannot reach URL/,
+            'connection error is classified'
+        ],
+        [
+            'Some unknown error',
+            qr/URL validation failed/,
+            'unknown error is classified'
+        ],
+    );
+
+    for my $case (@cases) {
+        $validator->ua( mock_ua_with_error( $case->[0] ) );
+        my ( $result, $error ) =
+          wait_promise( $validator->check_url_reachable('http://example.com') );
+        is( $result, undef, 'no success result' );
+        like( $error, $case->[1], $case->[2] );
+    }
+};
+
+subtest 'check_url_reachable - missing URL' => sub {
+    my ( $result, $error ) =
+      wait_promise( $validator->check_url_reachable(undef) );
+
+    is( $result, undef,             'missing URL has no result' );
+    is( $error,  'URL is required', 'missing URL returns error' );
+};
+
+subtest 'check_url_reachable - empty URL' => sub {
+    my ( $result, $error ) =
+      wait_promise( $validator->check_url_reachable('') );
+
+    is( $result, undef,             'empty URL has no result' );
+    is( $error,  'URL is required', 'empty URL returns error' );
+};
+
+subtest 'check_ssl_certificate - non-HTTPS URL' => sub {
+    my ( $result, $error ) =
+      wait_promise( $validator->check_ssl_certificate('http://example.com') );
+
+    is( $result, 1,     'non-HTTPS URL passes without check' );
+    is( $error,  undef, 'non-HTTPS URL has no error' );
+};
+
+subtest 'check_ssl_certificate - HTTPS success' => sub {
+    $validator->ua( mock_ua_with_code(200) );
+    my ( $result, $error ) =
+      wait_promise( $validator->check_ssl_certificate('https://example.com') );
+
+    is( $result, 1,     'valid SSL certificate passes' );
+    is( $error,  undef, 'valid SSL certificate has no error' );
+};
+
+subtest 'check_ssl_certificate - SSL error' => sub {
+    $validator->ua( mock_ua_with_error('SSL certificate verification failed') );
+    my ( $result, $error ) =
+      wait_promise( $validator->check_ssl_certificate('https://example.com') );
+
+    is( $result, undef, 'SSL error has no result' );
+    like( $error, qr/Invalid SSL certificate/, 'SSL error is detected' );
+};
+
+subtest 'check_ssl_certificate - non-SSL error' => sub {
+    $validator->ua( mock_ua_with_error('Connection refused') );
+    my ( $result, $error ) =
+      wait_promise( $validator->check_ssl_certificate('https://example.com') );
+
+    is( $result, undef, 'non-SSL error has no result' );
+    like( $error, qr/Cannot reach URL/, 'non-SSL error is classified' );
+};
+
+subtest 'check_ssl_certificate - DNS error' => sub {
+    $validator->ua( mock_ua_with_error('Name or service not known') );
+    my ( $result, $error ) =
+      wait_promise( $validator->check_ssl_certificate('https://example.com') );
+
+    is( $result, undef, 'DNS error has no result' );
+    like( $error, qr/DNS resolution failed/, 'DNS error is classified' );
+};
+
+subtest 'check_ssl_certificate - unknown error' => sub {
+    $validator->ua( mock_ua_with_error('Some unknown error') );
+    my ( $result, $error ) =
+      wait_promise( $validator->check_ssl_certificate('https://example.com') );
+
+    is( $result, undef, 'unknown error has no result' );
+    like( $error, qr/URL validation failed/, 'unknown error is classified' );
+};
+
+subtest 'check_ssl_certificate - missing URL' => sub {
+    my ( $result, $error ) =
+      wait_promise( $validator->check_ssl_certificate(undef) );
+
+    is( $result, undef,             'missing URL has no result' );
+    is( $error,  'URL is required', 'missing URL returns error' );
+};
+
+subtest 'check_ssl_certificate - empty URL' => sub {
+    my ( $result, $error ) =
+      wait_promise( $validator->check_ssl_certificate('') );
+
+    is( $result, undef,             'empty URL has no result' );
+    is( $error,  'URL is required', 'empty URL returns error' );
+};
+
+subtest 'validate_url_with_checks - missing URL' => sub {
+    my ( $result, $error ) =
+      wait_promise( $validator->validate_url_with_checks(undef) );
+
+    is( $result, undef,             'missing URL has no result' );
+    is( $error,  'URL is required', 'missing URL returns error' );
+};
+
+subtest 'validate_url_with_checks - empty URL' => sub {
+    my ( $result, $error ) =
+      wait_promise( $validator->validate_url_with_checks('') );
+
+    is( $result, undef,             'empty URL has no result' );
+    is( $error,  'URL is required', 'empty URL returns error' );
+};
+
+subtest 'validate_url_with_checks - invalid URL format' => sub {
+    my ( $result, $error ) =
+      wait_promise( $validator->validate_url_with_checks('not a url') );
+
+    is( $result, undef,                'invalid format has no result' );
+    is( $error,  'Invalid URL format', 'invalid URL format returns error' );
+};
+
+subtest 'validate_url_with_checks - invalid scheme' => sub {
+    my ( $result, $error ) =
+      wait_promise( $validator->validate_url_with_checks('ftp://example.com') );
+
+    is( $result, undef,                'invalid scheme has no result' );
+    is( $error,  'Invalid URL format', 'invalid scheme returns error' );
+};
+
+subtest 'validate_url_with_checks - missing host' => sub {
+    my ( $result, $error ) =
+      wait_promise( $validator->validate_url_with_checks('http://') );
+
+    is( $result, undef,                'missing host has no result' );
+    is( $error,  'Invalid URL format', 'missing host returns error' );
+};
+
+subtest 'validate_url_with_checks - URL too long' => sub {
+    my $long_url = 'http://example.com/' . ( 'a' x 2049 );
+    my ( $result, $error ) =
+      wait_promise( $validator->validate_url_with_checks($long_url) );
+
+    is( $result, undef, 'URL too long has no result' );
+    like( $error, qr/exceeds maximum length/, 'URL too long returns error' );
+};
+
+subtest 'validate_url_with_checks - blocked URL' => sub {
+    my ( $result, $error ) =
+      wait_promise(
+        $validator->validate_url_with_checks('http://localhost/path') );
+
+    is( $result, undef, 'blocked URL has no result' );
+    like( $error, qr/cannot be shortened/, 'blocked URL returns error' );
+};
+
+subtest 'validate_url_with_checks - blocked IPv6 URL' => sub {
+    my ( $result, $error ) =
+      wait_promise( $validator->validate_url_with_checks('http://[::1]/path') );
+
+    is( $result, undef, 'blocked IPv6 URL has no result' );
+    like( $error, qr/cannot be shortened/, 'blocked IPv6 URL returns error' );
+};
+
+subtest 'validate_url_with_checks - HTTP success' => sub {
+    $validator->ua( mock_ua_with_code(200) );
+    my ( $result, $error ) = wait_promise(
+        $validator->validate_url_with_checks('http://example.com/path') );
+
+    is( $result, 'http://example.com/path', 'valid HTTP URL passes' );
+    is( $error,  undef,                     'valid HTTP URL has no error' );
+};
+
+subtest 'validate_url_with_checks - HTTPS success' => sub {
+    $validator->ua( mock_ua_with_code(200) );
+    my ( $result, $error ) = wait_promise(
+        $validator->validate_url_with_checks('https://example.com/path') );
+
+    is( $result, 'https://example.com/path', 'valid HTTPS URL passes' );
+    is( $error,  undef,                      'valid HTTPS URL has no error' );
+};
+
+subtest 'validate_url_with_checks - URL sanitization' => sub {
+    $validator->ua( mock_ua_with_code(200) );
+    my ( $result, $error ) =
+      wait_promise( $validator->validate_url_with_checks('example.com/path') );
+
+    is( $result, 'http://example.com/path', 'URL is sanitized' );
+    is( $error,  undef,                     'URL sanitization has no error' );
+};
+
+subtest 'validate_url_with_checks - SSL check failure' => sub {
+    $validator->ua( mock_ua_with_error('SSL certificate verification failed') );
+    my ( $result, $error ) =
+      wait_promise(
+        $validator->validate_url_with_checks('https://example.com') );
+
+    is( $result, undef, 'SSL check failure has no result' );
+    like( $error, qr/Invalid SSL certificate/,
+        'SSL check failure is detected' );
+};
+
+subtest 'validate_url_with_checks - reachability check failure' => sub {
+    my $mock_ua     = Test::MockObject->new;
+    my $mock_tx     = Test::MockObject->new;
+    my $mock_result = Test::MockObject->new;
+    my $call_count  = 0;
+
+    $mock_result->mock( 'code', sub { 200 } );
+    $mock_tx->mock( 'result', sub { $mock_result } );
+    $mock_ua->mock(
+        'head_p',
+        sub {
+            $call_count++;
+            return $call_count == 1
+              ? Mojo::Promise->resolve($mock_tx)
+              : Mojo::Promise->reject('Connection refused');
+        }
+    );
+
+    $validator->ua($mock_ua);
+
+    my ( $result, $error ) =
+      wait_promise(
+        $validator->validate_url_with_checks('https://example.com') );
+
+    is( $result, undef, 'reachability failure has no result' );
+    like(
+        $error,
+        qr/Cannot reach URL/,
+        'reachability check failure is detected'
+    );
+};
+
+done_testing();
