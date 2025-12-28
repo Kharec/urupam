@@ -27,6 +27,16 @@ h1 {
     color: #444;
 }
 
+.brand-mark {
+    position: fixed;
+    left: 1rem;
+    top: 1rem;
+    font-size: 0.85rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #777;
+}
+
 .page-center h1 {
     margin-bottom: 0.5rem;
 }
