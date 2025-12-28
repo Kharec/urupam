@@ -94,8 +94,8 @@ sub startup {
                 && $validator->validate_short_code($short_code) )
             {
                 $c->render(
-                    json   => { error => 'Invalid short code format' },
-                    status => 400
+                    template => '404',
+                    status   => 404
                 );
                 return;
             }
@@ -109,8 +109,8 @@ sub startup {
                     }
                     else {
                         $c->render(
-                            json   => { error => 'Short code not found' },
-                            status => 404
+                            template => '404',
+                            status   => 404
                         );
                     }
                 }
@@ -120,8 +120,8 @@ sub startup {
                     return if $c->stash->{rendered};
                     $c->app->log->error("Redirect lookup error: $err");
                     $c->render(
-                        json   => { error => 'Internal server error' },
-                        status => 500
+                        template => '500',
+                        status   => 500
                     );
                 }
             );
