@@ -58,6 +58,7 @@ sub sanitize_url {
         return undef if $authority =~ /[\s\x00-\x1F\x7F]/;
 
         my $hostport = ( split /\@/, $authority )[-1];
+        return undef unless defined $hostport && length $hostport;
         my $host_raw;
         if ( $hostport =~ /^\[(.+)\](?::\d+)?$/ ) {
             $host_raw = $1;
