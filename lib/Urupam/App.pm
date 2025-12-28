@@ -60,9 +60,7 @@ sub startup {
     $r->get('/')->to(
         cb => sub {
             my $c = shift;
-            $c->render(
-                json => { status => 'hello from urupam', service => 'urupam' }
-            );
+            $c->render( template => 'index' );
         }
     );
 
