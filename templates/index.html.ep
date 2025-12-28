@@ -1,5 +1,5 @@
 % layout 'default';
-% stash title => 'Urupam - URL Shortener';
+% stash title => 'Urupam';
 <main class="page">
     <form id="shorten-form">
         <div class="form-group">
