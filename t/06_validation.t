@@ -2,6 +2,7 @@ use Test::More;
 use Test::MockObject;
 use Mojo::Promise;
 use Urupam::Validation;
+use Socket qw(AF_INET);
 
 use_ok('Urupam::Validation');
 
@@ -76,6 +77,18 @@ sub with_ssrf_ua {
     no warnings 'redefine';
     local *Urupam::Validation::_create_ssrf_safe_ua = sub {
         return $ua;
+    };
+    return $code->();
+}
+
+sub with_subprocess_stub {
+    my ( $result, $code, $calls_ref ) = @_;
+    no warnings 'redefine';
+    local *Mojo::IOLoop::subprocess = sub {
+        my ( $class, $work, $finish, $host ) = @_;
+        $$calls_ref++ if defined $calls_ref;
+        $finish->( undef, undef, $result );
+        return;
     };
     return $code->();
 }
@@ -269,6 +282,38 @@ subtest 'is_blocked_url' => sub {
             }
         }
     );
+};
+
+subtest '_resolve_host - caches results' => sub {
+    my $calls  = 0;
+    my $result = {
+        error   => 0,
+        results => [ { addr => '127.0.0.1', family => AF_INET } ],
+    };
+
+    with_subprocess_stub(
+        $result,
+        sub {
+            my ( $value, $error ) =
+              wait_promise( $validator->_resolve_host('example.com') );
+            is( $error,         undef, 'first resolve has no error' );
+            is( scalar @$value, 1,     'first resolve returns one address' );
+        },
+        \$calls
+    );
+
+    with_subprocess_stub(
+        $result,
+        sub {
+            my ( $value, $error ) =
+              wait_promise( $validator->_resolve_host('example.com') );
+            is( $error,         undef, 'cached resolve has no error' );
+            is( scalar @$value, 1,     'cached resolve returns one address' );
+        },
+        \$calls
+    );
+
+    is( $calls, 1, 'subprocess called once due to cache' );
 };
 
 subtest 'validate_short_code' => sub {
