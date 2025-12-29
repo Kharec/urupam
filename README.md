@@ -10,33 +10,36 @@
 
 ## Installation
 
+### Classic
+
 Run the installation script:
 
 ```sh
 scripts/install.sh
 ```
 
-Enable and start the systemd service:
+It will create a `urupam` user and group, deploy the application in `/opt/urupam` and create/enable a `systemd` service. Documentation will be installed in `/usr/share/doc/urupam`.
 
-```sh
-sudo systemctl enable --now urupam
-```
+The application will listen on `:8080`.
 
 ### Using docker
 
 Build the image and use the `docker-compose` file:
 
 ```sh
-cd docker
 docker build -t urupam .
 docker compose up -d
 ```
 
+Alternatively, if you already have a running `redis` instance, you can skip `compose` and start a standalone container:
+
+```sh
+docker run --name urupam -p 8080:8080 -d urupam:latest
+```
+
 ## Hacking
 
-To run the application in development, you'll first need a Redis server.
-
-The easiest way is to start a local Redis instance using Docker:
+To run the application in development, you'll first need a Redis server. The easiest way is to start one is using Docker:
 
 ```sh
 docker run --name mojo-redis -p 6379:6379 -d redis
