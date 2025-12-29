@@ -26,7 +26,7 @@ groupadd urupam
 useradd -s /bin/bash -g urupam -d /opt/urupam urupam
 
 # deploy code
-cp -r bin lib cpan* /opt/urupam
+cp -r bin lib cpanfile public templates /opt/urupam
 chown -R urupam:urupam /opt/urupam
 
 # install dependencies
