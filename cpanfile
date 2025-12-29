@@ -5,6 +5,7 @@ requires 'Mojo::URL';
 requires 'Mojo::UserAgent';
 requires 'Mojo::Util';
 requires 'Mojolicious';
+requires 'Bytes::Random::Secure';
 
 on test => sub {
     requires 'Test::Mojo';
