@@ -38,7 +38,7 @@ sub shorten {
     )->then(
         sub {
             my $short_code = shift;
-            return if $c->stash->{rendered};
+            return if $c->rendered;
             my $short_url = $c->url_for("/$short_code")->to_abs;
             $c->render(
                 json => {
@@ -52,7 +52,7 @@ sub shorten {
     )->catch(
         sub {
             my $err = shift;
-            return if $c->stash->{rendered};
+            return if $c->rendered;
             $c->app->log->error("API URL validation/creation error: $err");
             my $status          = get_error_status($err);
             my $sanitized_error = sanitize_error_message($err);
@@ -82,7 +82,7 @@ sub get_url {
     return $url_service->get_original_url($short_code)->then(
         sub {
             my $original_url = shift;
-            return if $c->stash->{rendered};
+            return if $c->rendered;
             if ($original_url) {
                 my $short_url = $c->url_for("/$short_code")->to_abs;
                 $c->render(
@@ -104,7 +104,7 @@ sub get_url {
     )->catch(
         sub {
             my $err = shift;
-            return if $c->stash->{rendered};
+            return if $c->rendered;
             $c->app->log->error("API URL retrieval error: $err");
             my $status          = get_error_status($err);
             my $sanitized_error = sanitize_error_message($err);
