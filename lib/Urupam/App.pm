@@ -5,6 +5,7 @@ use Urupam::DB;
 use Urupam::URL;
 use Urupam::Validation;
 use Urupam::API;
+use Urupam::Version;
 
 sub startup {
     my $self = shift;
@@ -29,6 +30,12 @@ sub startup {
             $c->stash->{validator} ||= Urupam::Validation->new;
         }
     );
+    $self->helper(
+        version => sub {
+            my $c = shift;
+            $c->stash->{version} ||= Urupam::Version->new->get_version;
+        }
+    );
 
     my $r = $self->routes;
 
@@ -39,7 +46,12 @@ sub startup {
             $c->db->ping->then(
                 sub {
                     return if $c->stash->{rendered};
-                    $c->render( json => { status => 'ok' } );
+                    $c->render(
+                        json => {
+                            status  => 'ok',
+                            version => $c->version
+                        }
+                    );
                 }
             )->catch(
                 sub {
