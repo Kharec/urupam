@@ -43,9 +43,11 @@ sub startup {
         cb => sub {
             my $c = shift;
             $c->render_later;
+            my $responded = 0;
             $c->db->ping->then(
                 sub {
-                    return if $c->rendered;
+                    return if $responded;
+                    $responded = 1;
                     $c->render(
                         json => {
                             status  => 'ok',
@@ -56,7 +58,8 @@ sub startup {
             )->catch(
                 sub {
                     my $err = shift;
-                    return if $c->rendered;
+                    return if $responded;
+                    $responded = 1;
                     $c->app->log->error("Health check DB error: $err");
                     $c->render(
                         json => {
@@ -96,6 +99,7 @@ sub startup {
         cb => sub {
             my $c = shift;
             $c->render_later;
+            my $responded   = 0;
             my $short_code  = $c->param('short_code') // '';
             my $url_service = $c->url_service;
             my $validator   = $c->validator;
@@ -103,6 +107,8 @@ sub startup {
             unless ( $short_code
                 && $validator->validate_short_code($short_code) )
             {
+                return if $responded;
+                $responded = 1;
                 $c->render(
                     template => '404',
                     status   => 404
@@ -113,7 +119,8 @@ sub startup {
             return $url_service->get_original_url($short_code)->then(
                 sub {
                     my $original_url = shift;
-                    return if $c->rendered;
+                    return if $responded;
+                    $responded = 1;
                     if ($original_url) {
                         $c->redirect_to($original_url);
                     }
@@ -127,7 +134,8 @@ sub startup {
             )->catch(
                 sub {
                     my $err = shift;
-                    return if $c->rendered;
+                    return if $responded;
+                    $responded = 1;
                     $c->app->log->error("Redirect lookup error: $err");
                     $c->render(
                         template => '500',

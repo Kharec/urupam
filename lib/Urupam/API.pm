@@ -6,11 +6,14 @@ use Urupam::Utils qw(sanitize_input get_error_status sanitize_error_message);
 sub shorten {
     my $c = shift;
     $c->render_later;
+    my $responded   = 0;
     my $url_service = $c->url_service;
     my $validator   = $c->validator;
 
     my $json = $c->req->json;
     unless ( defined $json && ref $json eq 'HASH' ) {
+        return if $responded;
+        $responded = 1;
         $c->render(
             json   => { error => 'Invalid JSON format' },
             status => 400
@@ -21,6 +24,8 @@ sub shorten {
     my $original_url = sanitize_input( $json->{url} || '' );
 
     unless ($original_url) {
+        return if $responded;
+        $responded = 1;
         $c->render(
             json   => { error => 'URL is required' },
             status => 400
@@ -38,7 +43,8 @@ sub shorten {
     )->then(
         sub {
             my $short_code = shift;
-            return if $c->rendered;
+            return if $responded;
+            $responded = 1;
             my $short_url = $c->url_for("/$short_code")->to_abs;
             $c->render(
                 json => {
@@ -52,7 +58,8 @@ sub shorten {
     )->catch(
         sub {
             my $err = shift;
-            return if $c->rendered;
+            return if $responded;
+            $responded = 1;
             $c->app->log->error("API URL validation/creation error: $err");
             my $status          = get_error_status($err);
             my $sanitized_error = sanitize_error_message($err);
@@ -67,11 +74,14 @@ sub shorten {
 sub get_url {
     my $c = shift;
     $c->render_later;
+    my $responded   = 0;
     my $short_code  = $c->param('short_code') // '';
     my $url_service = $c->url_service;
     my $validator   = $c->validator;
 
     unless ( $short_code && $validator->validate_short_code($short_code) ) {
+        return if $responded;
+        $responded = 1;
         $c->render(
             json   => { error => 'Invalid short code format' },
             status => 400
@@ -82,7 +92,8 @@ sub get_url {
     return $url_service->get_original_url($short_code)->then(
         sub {
             my $original_url = shift;
-            return if $c->rendered;
+            return if $responded;
+            $responded = 1;
             if ($original_url) {
                 my $short_url = $c->url_for("/$short_code")->to_abs;
                 $c->render(
@@ -104,7 +115,8 @@ sub get_url {
     )->catch(
         sub {
             my $err = shift;
-            return if $c->rendered;
+            return if $responded;
+            $responded = 1;
             $c->app->log->error("API URL retrieval error: $err");
             my $status          = get_error_status($err);
             my $sanitized_error = sanitize_error_message($err);
