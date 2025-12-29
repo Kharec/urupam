@@ -17,17 +17,27 @@ sub wait_promise {
 }
 
 sub mock_ua_with_code {
-    my ($code)      = @_;
-    my $mock_ua     = Test::MockObject->new;
-    my $mock_tx     = Test::MockObject->new;
-    my $mock_result = Test::MockObject->new;
+    my ($code)          = @_;
+    my $mock_ua         = Test::MockObject->new;
+    my $mock_tx         = Test::MockObject->new;
+    my $mock_result     = Test::MockObject->new;
+    my $mock_get_tx     = Test::MockObject->new;
+    my $mock_get_result = Test::MockObject->new;
 
     $mock_result->mock( 'code', sub { $code } );
     $mock_tx->mock( 'result', sub { $mock_result } );
+    $mock_get_result->mock( 'code', sub { $code } );
+    $mock_get_tx->mock( 'result', sub { $mock_get_result } );
     $mock_ua->mock(
         'head_p',
         sub {
             return Mojo::Promise->resolve($mock_tx);
+        }
+    );
+    $mock_ua->mock(
+        'get_p',
+        sub {
+            return Mojo::Promise->resolve($mock_get_tx);
         }
     );
 
@@ -274,7 +284,7 @@ subtest 'check_url_reachable - success codes' => sub {
 
 subtest 'check_url_reachable - error codes' => sub {
     my @cases = (
-        [ 404, qr/URL returned 404 error/, '4xx status returns error' ],
+        [ 410, qr/URL returned 410 error/, '4xx status returns error' ],
         [ 500, qr/URL returned 500 error/, '5xx status returns error' ],
         [ 100, qr/unexpected status/,      'unexpected status returns error' ],
     );
@@ -286,6 +296,74 @@ subtest 'check_url_reachable - error codes' => sub {
         is( $result, undef, "$case->[0] status has no result" );
         like( $error, $case->[1], $case->[2] );
     }
+};
+
+subtest 'check_url_reachable - HEAD fallback to GET' => sub {
+    my $mock_ua     = Test::MockObject->new;
+    my $head_tx     = Test::MockObject->new;
+    my $head_result = Test::MockObject->new;
+    my $get_tx      = Test::MockObject->new;
+    my $get_result  = Test::MockObject->new;
+
+    $head_result->mock( 'code', sub { 404 } );
+    $head_tx->mock( 'result', sub { $head_result } );
+
+    $get_result->mock( 'code', sub { 200 } );
+    $get_tx->mock( 'result', sub { $get_result } );
+
+    $mock_ua->mock(
+        'head_p',
+        sub {
+            return Mojo::Promise->resolve($head_tx);
+        }
+    );
+    $mock_ua->mock(
+        'get_p',
+        sub {
+            return Mojo::Promise->resolve($get_tx);
+        }
+    );
+
+    $validator->ua($mock_ua);
+    my ( $result, $error ) =
+      wait_promise( $validator->check_url_reachable('http://example.com') );
+
+    is( $result, 1,     'GET fallback returns success' );
+    is( $error,  undef, 'GET fallback has no error' );
+};
+
+subtest 'check_url_reachable - HEAD fallback error' => sub {
+    my $mock_ua     = Test::MockObject->new;
+    my $head_tx     = Test::MockObject->new;
+    my $head_result = Test::MockObject->new;
+    my $get_tx      = Test::MockObject->new;
+    my $get_result  = Test::MockObject->new;
+
+    $head_result->mock( 'code', sub { 405 } );
+    $head_tx->mock( 'result', sub { $head_result } );
+
+    $get_result->mock( 'code', sub { 500 } );
+    $get_tx->mock( 'result', sub { $get_result } );
+
+    $mock_ua->mock(
+        'head_p',
+        sub {
+            return Mojo::Promise->resolve($head_tx);
+        }
+    );
+    $mock_ua->mock(
+        'get_p',
+        sub {
+            return Mojo::Promise->resolve($get_tx);
+        }
+    );
+
+    $validator->ua($mock_ua);
+    my ( $result, $error ) =
+      wait_promise( $validator->check_url_reachable('http://example.com') );
+
+    is( $result, undef, 'GET fallback error has no result' );
+    like( $error, qr/URL returned 500 error/, 'GET fallback error reported' );
 };
 
 subtest 'check_url_reachable - classified errors' => sub {
