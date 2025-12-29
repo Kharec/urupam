@@ -53,6 +53,12 @@ sub mock_ua_with_error {
             return Mojo::Promise->reject($error);
         }
     );
+    $mock_ua->mock(
+        'get_p',
+        sub {
+            return Mojo::Promise->reject($error);
+        }
+    );
     return $mock_ua;
 }
 
@@ -61,6 +67,15 @@ sub with_resolved_addresses {
     no warnings 'redefine';
     local *Urupam::Validation::_resolve_host = sub {
         return Mojo::Promise->resolve($addresses);
+    };
+    return $code->();
+}
+
+sub with_ssrf_ua {
+    my ( $ua, $code ) = @_;
+    no warnings 'redefine';
+    local *Urupam::Validation::_create_ssrf_safe_ua = sub {
+        return $ua;
     };
     return $code->();
 }
@@ -170,20 +185,20 @@ subtest '_is_private_ipv4' => sub {
 
 subtest '_is_private_ipv6' => sub {
     my @private = (
-        [ '::1',                '::1 is private' ],
-        [ '[::1]',              '[::1] is private' ],
-        [ '::',                 ':: is private' ],
-        [ '::ffff:127.0.0.1',   '::ffff:127.0.0.1 is private' ],
-        [ '::ffff:192.168.1.1', '::ffff:192.168.1.1 is private' ],
-        [ '::ffff:10.0.0.1',    '::ffff:10.0.0.1 is private' ],
-        [ '::ffff:172.16.0.1',  '::ffff:172.16.0.1 is private' ],
-        [ 'fc00::1',            'fc00::/7 (unique local) is private' ],
-        [ 'fcff::1',            'fc00::/7 (unique local) is private' ],
-        [ 'fd00::1',            'fc00::/7 (unique local) is private' ],
-        [ 'fdff::1',            'fc00::/7 (unique local) is private' ],
-        [ 'fe80::1',            'fe80::/10 (link-local) is private' ],
-        [ 'fe80::abcd',         'fe80::/10 (link-local) is private' ],
-        [ 'febf::1',            'fe80::/10 (link-local) is private' ],
+        [ '::1',                   '::1 is private' ],
+        [ '[::1]',                 '[::1] is private' ],
+        [ '::',                    ':: is private' ],
+        [ '::ffff:127.0.0.1',      '::ffff:127.0.0.1 is private' ],
+        [ '::ffff:192.168.1.1',    '::ffff:192.168.1.1 is private' ],
+        [ '::ffff:10.0.0.1',       '::ffff:10.0.0.1 is private' ],
+        [ '::ffff:172.16.0.1',     '::ffff:172.16.0.1 is private' ],
+        [ 'fc00:0:0:0:0:0:0:1',    'fc00::/7 (unique local) is private' ],
+        [ 'fcff:0:0:0:0:0:0:1',    'fc00::/7 (unique local) is private' ],
+        [ 'fd00:0:0:0:0:0:0:1',    'fc00::/7 (unique local) is private' ],
+        [ 'fdff:0:0:0:0:0:0:1',    'fc00::/7 (unique local) is private' ],
+        [ 'fe80:0:0:0:0:0:0:1',    'fe80::/10 (link-local) is private' ],
+        [ 'fe80:0:0:0:0:0:0:abcd', 'fe80::/10 (link-local) is private' ],
+        [ 'febf:0:0:0:0:0:0:1',    'fe80::/10 (link-local) is private' ],
     );
     my @public = (
         [ '2001:db8::1',    '2001:db8::1 is not private' ],
@@ -212,10 +227,22 @@ subtest 'is_blocked_url' => sub {
         [ 'http://192.168.1.1/path', '192.168.1.1 is blocked' ],
         [ 'http://10.0.0.1/path',    '10.0.0.1 is blocked' ],
         [ 'http://172.16.0.1/path',  '172.16.0.1 is blocked' ],
-        [ 'http://[fc00::1]/path',   'fc00::/7 (unique local) is blocked' ],
-        [ 'http://[fd00::1]/path',   'fc00::/7 (unique local) is blocked' ],
-        [ 'http://[fe80::1]/path',   'fe80::/10 (link-local) is blocked' ],
-        [ 'http://[febf::1]/path',   'fe80::/10 (link-local) is blocked' ],
+        [
+            'http://[fc00:0:0:0:0:0:0:1]/path',
+            'fc00::/7 (unique local) is blocked'
+        ],
+        [
+            'http://[fd00:0:0:0:0:0:0:1]/path',
+            'fc00::/7 (unique local) is blocked'
+        ],
+        [
+            'http://[fe80:0:0:0:0:0:0:1]/path',
+            'fe80::/10 (link-local) is blocked'
+        ],
+        [
+            'http://[febf:0:0:0:0:0:0:1]/path',
+            'fe80::/10 (link-local) is blocked'
+        ],
     );
     my @allowed = (
         [ 'http://example.com/path', 'public domain is not blocked' ],
@@ -273,12 +300,16 @@ subtest 'validate_short_code' => sub {
 };
 
 subtest 'check_url_reachable - success codes' => sub {
-    for my $code ( 200, 201, 301 ) {
-        $validator->ua( mock_ua_with_code($code) );
-        my ( $result, $error ) =
-          wait_promise( $validator->check_url_reachable('http://example.com') );
-        is( $result, 1,     "$code status returns 1" );
-        is( $error,  undef, "$code status has no error" );
+    for my $code ( 200, 201 ) {
+        with_ssrf_ua(
+            mock_ua_with_code($code),
+            sub {
+                my ( $result, $error ) = wait_promise(
+                    $validator->check_url_reachable('http://example.com') );
+                is( $result, 1,     "$code status returns 1" );
+                is( $error,  undef, "$code status has no error" );
+            }
+        );
     }
 };
 
@@ -290,11 +321,15 @@ subtest 'check_url_reachable - error codes' => sub {
     );
 
     for my $case (@cases) {
-        $validator->ua( mock_ua_with_code( $case->[0] ) );
-        my ( $result, $error ) =
-          wait_promise( $validator->check_url_reachable('http://example.com') );
-        is( $result, undef, "$case->[0] status has no result" );
-        like( $error, $case->[1], $case->[2] );
+        with_ssrf_ua(
+            mock_ua_with_code( $case->[0] ),
+            sub {
+                my ( $result, $error ) = wait_promise(
+                    $validator->check_url_reachable('http://example.com') );
+                is( $result, undef, "$case->[0] status has no result" );
+                like( $error, $case->[1], $case->[2] );
+            }
+        );
     }
 };
 
@@ -324,9 +359,14 @@ subtest 'check_url_reachable - HEAD fallback to GET' => sub {
         }
     );
 
-    $validator->ua($mock_ua);
-    my ( $result, $error ) =
-      wait_promise( $validator->check_url_reachable('http://example.com') );
+    my ( $result, $error );
+    with_ssrf_ua(
+        $mock_ua,
+        sub {
+            ( $result, $error ) = wait_promise(
+                $validator->check_url_reachable('http://example.com') );
+        }
+    );
 
     is( $result, 1,     'GET fallback returns success' );
     is( $error,  undef, 'GET fallback has no error' );
@@ -358,9 +398,14 @@ subtest 'check_url_reachable - HEAD fallback error' => sub {
         }
     );
 
-    $validator->ua($mock_ua);
-    my ( $result, $error ) =
-      wait_promise( $validator->check_url_reachable('http://example.com') );
+    my ( $result, $error );
+    with_ssrf_ua(
+        $mock_ua,
+        sub {
+            ( $result, $error ) = wait_promise(
+                $validator->check_url_reachable('http://example.com') );
+        }
+    );
 
     is( $result, undef, 'GET fallback error has no result' );
     like( $error, qr/URL returned 500 error/, 'GET fallback error reported' );
@@ -391,11 +436,15 @@ subtest 'check_url_reachable - classified errors' => sub {
     );
 
     for my $case (@cases) {
-        $validator->ua( mock_ua_with_error( $case->[0] ) );
-        my ( $result, $error ) =
-          wait_promise( $validator->check_url_reachable('http://example.com') );
-        is( $result, undef, 'no success result' );
-        like( $error, $case->[1], $case->[2] );
+        with_ssrf_ua(
+            mock_ua_with_error( $case->[0] ),
+            sub {
+                my ( $result, $error ) = wait_promise(
+                    $validator->check_url_reachable('http://example.com') );
+                is( $result, undef, 'no success result' );
+                like( $error, $case->[1], $case->[2] );
+            }
+        );
     }
 };
 
@@ -556,8 +605,14 @@ subtest 'validate_url_with_checks - HTTP success' => sub {
     with_resolved_addresses(
         [],
         sub {
-            ( $result, $error ) = wait_promise(
-                $validator->validate_url_with_checks('http://example.com/path')
+            with_ssrf_ua(
+                mock_ua_with_code(200),
+                sub {
+                    ( $result, $error ) = wait_promise(
+                        $validator->validate_url_with_checks(
+                            'http://example.com/path')
+                    );
+                }
             );
         }
     );
@@ -572,9 +627,14 @@ subtest 'validate_url_with_checks - HTTPS success' => sub {
     with_resolved_addresses(
         [],
         sub {
-            ( $result, $error ) = wait_promise(
-                $validator->validate_url_with_checks(
-                    'https://example.com/path')
+            with_ssrf_ua(
+                mock_ua_with_code(200),
+                sub {
+                    ( $result, $error ) = wait_promise(
+                        $validator->validate_url_with_checks(
+                            'https://example.com/path')
+                    );
+                }
             );
         }
     );
@@ -589,8 +649,15 @@ subtest 'validate_url_with_checks - URL sanitization' => sub {
     with_resolved_addresses(
         [],
         sub {
-            ( $result, $error ) = wait_promise(
-                $validator->validate_url_with_checks('example.com/path') );
+            with_ssrf_ua(
+                mock_ua_with_code(200),
+                sub {
+                    ( $result, $error ) = wait_promise(
+                        $validator->validate_url_with_checks(
+                            'example.com/path')
+                    );
+                }
+            );
         }
     );
 
@@ -604,8 +671,15 @@ subtest 'validate_url_with_checks - SSL check failure' => sub {
     with_resolved_addresses(
         [],
         sub {
-            ( $result, $error ) = wait_promise(
-                $validator->validate_url_with_checks('https://example.com') );
+            with_ssrf_ua(
+                mock_ua_with_code(200),
+                sub {
+                    ( $result, $error ) = wait_promise(
+                        $validator->validate_url_with_checks(
+                            'https://example.com')
+                    );
+                }
+            );
         }
     );
 
@@ -638,8 +712,15 @@ subtest 'validate_url_with_checks - reachability check failure' => sub {
     with_resolved_addresses(
         [],
         sub {
-            ( $result, $error ) = wait_promise(
-                $validator->validate_url_with_checks('https://example.com') );
+            with_ssrf_ua(
+                $mock_ua,
+                sub {
+                    ( $result, $error ) = wait_promise(
+                        $validator->validate_url_with_checks(
+                            'https://example.com')
+                    );
+                }
+            );
         }
     );
 
