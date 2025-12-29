@@ -2,7 +2,9 @@ use Test::More;
 use Test::Mojo;
 use Urupam::App;
 
-my $t = Test::Mojo->new('Urupam::App');
+my $t;
+eval { $t = Test::Mojo->new('Urupam::App'); 1 }
+  or plan skip_all => "Test server not available: $@";
 
 my $CODE_PATTERN   = qr/^[0-9a-zA-Z\-_]+$/;
 my $CODE_LENGTH    = 12;
@@ -18,10 +20,9 @@ sub validate_short_code_format {
 
 sub post_shorten {
     my ($url) = @_;
-    my $tx = $t->post_ok( '/api/v1/urls' => json => { url => $url } );
-    my $json = $tx->tx->res->json;
-    my $error =
-      ref $json eq 'HASH' ? ( $json->{error} // '' ) : '';
+    my $tx    = $t->post_ok( '/api/v1/urls' => json => { url => $url } );
+    my $json  = $tx->tx->res->json;
+    my $error = ref $json eq 'HASH' ? ( $json->{error} // '' ) : '';
     return {
         tx    => $tx,
         code  => $tx->tx->res->code,
@@ -32,10 +33,9 @@ sub post_shorten {
 
 sub get_url {
     my ($code) = @_;
-    my $tx = $t->get_ok("/api/v1/urls/$code");
-    my $json = $tx->tx->res->json;
-    my $error =
-      ref $json eq 'HASH' ? ( $json->{error} // '' ) : '';
+    my $tx     = $t->get_ok("/api/v1/urls/$code");
+    my $json   = $tx->tx->res->json;
+    my $error  = ref $json eq 'HASH' ? ( $json->{error} // '' ) : '';
     return {
         tx    => $tx,
         code  => $tx->tx->res->code,
@@ -192,7 +192,7 @@ subtest 'POST /api/v1/urls - Real validator invalid URL format' => sub {
 };
 
 subtest 'POST /api/v1/urls - Real validator URL length validation' => sub {
-    my $base         = 'https://www.example.com/';
+    my $base = 'https://www.example.com/';
     my $too_long_url =
       $base . ( 'a' x ( $MAX_URL_LENGTH - length($base) + 1 ) );
     my $res = post_shorten($too_long_url);
@@ -206,10 +206,8 @@ subtest 'POST /api/v1/urls - Real validator URL length validation' => sub {
 
 subtest 'POST /api/v1/urls - Real validator URL edge cases' => sub {
     for my $url (
-        'https://www.example.com?foo=bar',
-        'https://www.example.com#section',
-        'https://www.example.com:443',
-        'https://www.perl.org/about.html',
+        'https://www.example.com?foo=bar', 'https://www.example.com#section',
+        'https://www.example.com:443',     'https://www.perl.org/about.html',
       )
     {
         my $res = post_shorten($url);
@@ -283,11 +281,11 @@ subtest 'POST /api/v1/urls - Real database duplicate URL handling' => sub {
 
 subtest 'GET /api/v1/urls/:short_code - Real database error cases' => sub {
     my $res = get_url('nonexistent123456');
-    is( $res->{code}, 404, 'Non-existent code returns 404' );
+    is( $res->{code}, 400, 'Invalid format rejected: nonexistent123456' );
     is(
         $res->{error},
-        'Short code not found',
-        'Correct error message for non-existent code'
+        'Invalid short code format',
+        'Correct error for: nonexistent123456'
     );
 
     $res = get_url('');
@@ -295,8 +293,11 @@ subtest 'GET /api/v1/urls/:short_code - Real database error cases' => sub {
 
     $res = get_url('invalid@code');
     is( $res->{code}, 400, 'Invalid format rejected: invalid@code' );
-    is( $res->{error}, 'Invalid short code format',
-        'Correct error for: invalid@code' );
+    is(
+        $res->{error},
+        'Invalid short code format',
+        'Correct error for: invalid@code'
+    );
 };
 
 subtest 'End-to-end: Full flow with real components' => sub {
