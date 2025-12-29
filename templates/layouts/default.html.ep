@@ -9,5 +9,7 @@
 </head>
 <body>
     <%= content %>
+    <div class="brand-mark">urupam</div>
+    <div class="brand-version">v<%= $c->version %></div>
 </body>
 </html>
