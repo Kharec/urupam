@@ -41,7 +41,8 @@ sub startup {
         respond_once => sub {
             my $c        = shift;
             my $callback = shift;
-            return if $c->rendered;
+            return if $c->stash->{'urupam.responded'};
+            $c->stash->{'urupam.responded'} = 1;
             $callback->($c);
         }
     );
