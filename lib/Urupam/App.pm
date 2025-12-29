@@ -45,7 +45,7 @@ sub startup {
             $c->render_later;
             $c->db->ping->then(
                 sub {
-                    return if $c->stash->{rendered};
+                    return if $c->rendered;
                     $c->render(
                         json => {
                             status  => 'ok',
@@ -56,7 +56,7 @@ sub startup {
             )->catch(
                 sub {
                     my $err = shift;
-                    return if $c->stash->{rendered};
+                    return if $c->rendered;
                     $c->app->log->error("Health check DB error: $err");
                     $c->render(
                         json => {
@@ -113,7 +113,7 @@ sub startup {
             return $url_service->get_original_url($short_code)->then(
                 sub {
                     my $original_url = shift;
-                    return if $c->stash->{rendered};
+                    return if $c->rendered;
                     if ($original_url) {
                         $c->redirect_to($original_url);
                     }
@@ -127,7 +127,7 @@ sub startup {
             )->catch(
                 sub {
                     my $err = shift;
-                    return if $c->stash->{rendered};
+                    return if $c->rendered;
                     $c->app->log->error("Redirect lookup error: $err");
                     $c->render(
                         template => '500',
