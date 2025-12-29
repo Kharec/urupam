@@ -46,6 +46,15 @@ sub mock_ua_with_error {
     return $mock_ua;
 }
 
+sub with_resolved_addresses {
+    my ( $addresses, $code ) = @_;
+    no warnings 'redefine';
+    local *Urupam::Validation::_resolve_host = sub {
+        return Mojo::Promise->resolve($addresses);
+    };
+    return $code->();
+}
+
 subtest 'is_valid_url_length' => sub {
     ok( $validator->is_valid_url_length('http://example.com'),
         'valid URL length passes' );
@@ -158,11 +167,20 @@ subtest '_is_private_ipv6' => sub {
         [ '::ffff:192.168.1.1', '::ffff:192.168.1.1 is private' ],
         [ '::ffff:10.0.0.1',    '::ffff:10.0.0.1 is private' ],
         [ '::ffff:172.16.0.1',  '::ffff:172.16.0.1 is private' ],
+        [ 'fc00::1',            'fc00::/7 (unique local) is private' ],
+        [ 'fcff::1',            'fc00::/7 (unique local) is private' ],
+        [ 'fd00::1',            'fc00::/7 (unique local) is private' ],
+        [ 'fdff::1',            'fc00::/7 (unique local) is private' ],
+        [ 'fe80::1',            'fe80::/10 (link-local) is private' ],
+        [ 'fe80::abcd',         'fe80::/10 (link-local) is private' ],
+        [ 'febf::1',            'fe80::/10 (link-local) is private' ],
     );
     my @public = (
         [ '2001:db8::1',    '2001:db8::1 is not private' ],
         [ '::ffff:8.8.8.8', '::ffff:8.8.8.8 is not private' ],
-        [ 'invalid',        'invalid IPv6 is not private' ],
+        [ 'fec0::1', 'fec0:: is not private (deprecated, but not blocked)' ],
+        [ 'fec1::1', 'fec1:: is not private' ],
+        [ 'invalid', 'invalid IPv6 is not private' ],
     );
 
     for my $case (@private) {
@@ -184,6 +202,10 @@ subtest 'is_blocked_url' => sub {
         [ 'http://192.168.1.1/path', '192.168.1.1 is blocked' ],
         [ 'http://10.0.0.1/path',    '10.0.0.1 is blocked' ],
         [ 'http://172.16.0.1/path',  '172.16.0.1 is blocked' ],
+        [ 'http://[fc00::1]/path',   'fc00::/7 (unique local) is blocked' ],
+        [ 'http://[fd00::1]/path',   'fc00::/7 (unique local) is blocked' ],
+        [ 'http://[fe80::1]/path',   'fe80::/10 (link-local) is blocked' ],
+        [ 'http://[febf::1]/path',   'fe80::/10 (link-local) is blocked' ],
     );
     my @allowed = (
         [ 'http://example.com/path', 'public domain is not blocked' ],
@@ -192,29 +214,43 @@ subtest 'is_blocked_url' => sub {
         [ undef,                     'undef is not blocked' ],
     );
 
-    for my $case (@blocked) {
-        ok( $validator->is_blocked_url( $case->[0] ), $case->[1] );
-    }
+    with_resolved_addresses(
+        [],
+        sub {
+            for my $case (@blocked) {
+                my ( $result, $error ) =
+                  wait_promise( $validator->is_blocked_url( $case->[0] ) );
+                ok( $result, $case->[1] );
+                is( $error, undef, "no error for $case->[1]" );
+            }
 
-    for my $case (@allowed) {
-        ok( !$validator->is_blocked_url( $case->[0] ), $case->[1] );
-    }
+            for my $case (@allowed) {
+                my ( $result, $error ) =
+                  wait_promise( $validator->is_blocked_url( $case->[0] ) );
+                ok( !$result, $case->[1] );
+                is( $error, undef, "no error for $case->[1]" );
+            }
+        }
+    );
 };
 
 subtest 'validate_short_code' => sub {
     my @valid = (
-        [ 'abc123',  'alphanumeric code passes' ],
-        [ 'ABC123',  'uppercase code passes' ],
-        [ 'abc-123', 'code with dash passes' ],
-        [ 'abc_123', 'code with underscore passes' ],
-        [ 'a',       'single character passes' ],
+        [ 'abc123456789', 'alphanumeric code passes' ],
+        [ 'ABC123456789', 'uppercase code passes' ],
+        [ 'ab-123456789', 'code with dash passes' ],
+        [ 'ab_123456789', 'code with underscore passes' ],
+        [ '0123456789ab', '12 character code passes' ],
     );
     my @invalid = (
-        [ 'abc@123', 'code with @ fails' ],
-        [ 'abc.123', 'code with dot fails' ],
-        [ 'abc 123', 'code with space fails' ],
-        [ '',        'empty code fails' ],
-        [ undef,     'undef code fails' ],
+        [ 'abc@12345678',       'code with @ fails' ],
+        [ 'abc.12345678',       'code with dot fails' ],
+        [ 'abc 12345678',       'code with space fails' ],
+        [ 'abc123',             'code too short fails' ],
+        [ 'a',                  'single character fails' ],
+        [ 'abc123456789012345', 'code too long fails' ],
+        [ '',                   'empty code fails' ],
+        [ undef,                'undef code fails' ],
     );
 
     for my $case (@valid) {
@@ -438,8 +474,15 @@ subtest 'validate_url_with_checks - blocked IPv6 URL' => sub {
 
 subtest 'validate_url_with_checks - HTTP success' => sub {
     $validator->ua( mock_ua_with_code(200) );
-    my ( $result, $error ) = wait_promise(
-        $validator->validate_url_with_checks('http://example.com/path') );
+    my ( $result, $error );
+    with_resolved_addresses(
+        [],
+        sub {
+            ( $result, $error ) = wait_promise(
+                $validator->validate_url_with_checks('http://example.com/path')
+            );
+        }
+    );
 
     is( $result, 'http://example.com/path', 'valid HTTP URL passes' );
     is( $error,  undef,                     'valid HTTP URL has no error' );
@@ -447,8 +490,16 @@ subtest 'validate_url_with_checks - HTTP success' => sub {
 
 subtest 'validate_url_with_checks - HTTPS success' => sub {
     $validator->ua( mock_ua_with_code(200) );
-    my ( $result, $error ) = wait_promise(
-        $validator->validate_url_with_checks('https://example.com/path') );
+    my ( $result, $error );
+    with_resolved_addresses(
+        [],
+        sub {
+            ( $result, $error ) = wait_promise(
+                $validator->validate_url_with_checks(
+                    'https://example.com/path')
+            );
+        }
+    );
 
     is( $result, 'https://example.com/path', 'valid HTTPS URL passes' );
     is( $error,  undef,                      'valid HTTPS URL has no error' );
@@ -456,8 +507,14 @@ subtest 'validate_url_with_checks - HTTPS success' => sub {
 
 subtest 'validate_url_with_checks - URL sanitization' => sub {
     $validator->ua( mock_ua_with_code(200) );
-    my ( $result, $error ) =
-      wait_promise( $validator->validate_url_with_checks('example.com/path') );
+    my ( $result, $error );
+    with_resolved_addresses(
+        [],
+        sub {
+            ( $result, $error ) = wait_promise(
+                $validator->validate_url_with_checks('example.com/path') );
+        }
+    );
 
     is( $result, 'http://example.com/path', 'URL is sanitized' );
     is( $error,  undef,                     'URL sanitization has no error' );
@@ -465,9 +522,14 @@ subtest 'validate_url_with_checks - URL sanitization' => sub {
 
 subtest 'validate_url_with_checks - SSL check failure' => sub {
     $validator->ua( mock_ua_with_error('SSL certificate verification failed') );
-    my ( $result, $error ) =
-      wait_promise(
-        $validator->validate_url_with_checks('https://example.com') );
+    my ( $result, $error );
+    with_resolved_addresses(
+        [],
+        sub {
+            ( $result, $error ) = wait_promise(
+                $validator->validate_url_with_checks('https://example.com') );
+        }
+    );
 
     is( $result, undef, 'SSL check failure has no result' );
     like( $error, qr/Invalid SSL certificate/,
@@ -494,9 +556,14 @@ subtest 'validate_url_with_checks - reachability check failure' => sub {
 
     $validator->ua($mock_ua);
 
-    my ( $result, $error ) =
-      wait_promise(
-        $validator->validate_url_with_checks('https://example.com') );
+    my ( $result, $error );
+    with_resolved_addresses(
+        [],
+        sub {
+            ( $result, $error ) = wait_promise(
+                $validator->validate_url_with_checks('https://example.com') );
+        }
+    );
 
     is( $result, undef, 'reachability failure has no result' );
     like(
