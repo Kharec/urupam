@@ -117,19 +117,8 @@ sub _is_private_ipv6 {
 
     my $first = hex($first_part);
 
-    if ( $first >= 0xfc && $first <= 0xfd ) {
-        return 1;
-    }
-
-    if ( $first == 0xfe && @parts > 1 ) {
-        my $second_part = $parts[1] || '';
-        if ( length($second_part) > 0 ) {
-            my $second = hex($second_part);
-            if ( $second >= 0x80 && $second <= 0xbf ) {
-                return 1;
-            }
-        }
-    }
+    return 1 if ( $first & 0xfe00 ) == 0xfc00;
+    return 1 if ( $first & 0xffc0 ) == 0xfe80;
 
     return 0;
 }
