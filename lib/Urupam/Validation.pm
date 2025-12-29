@@ -5,7 +5,8 @@ use Mojo::URL;
 use Mojo::UserAgent;
 use Mojo::Promise;
 use Urupam::Utils qw(sanitize_url);
-use Socket qw(getaddrinfo getnameinfo NI_NUMERICHOST NI_NUMERICSERV AF_INET AF_INET6 SOCK_STREAM);
+use Socket
+  qw(getaddrinfo getnameinfo NI_NUMERICHOST NI_NUMERICSERV AF_INET AF_INET6 SOCK_STREAM);
 
 my $MAX_URL_LENGTH  = 2048;
 my $CONNECT_TIMEOUT = 10;
@@ -158,7 +159,7 @@ sub _resolve_host {
 
     my ( $err, @results ) =
       getaddrinfo( $host, undef, { socktype => SOCK_STREAM } );
-    return Mojo::Promise->resolve([]) if $err;
+    return Mojo::Promise->resolve( [] ) if $err;
 
     my @addresses;
     for my $res (@results) {
@@ -231,6 +232,24 @@ sub check_url_reachable {
             my $code = $tx->result->code;
 
             return 1 if $code >= 200 && $code < 400;
+            if ( $code == 403 || $code == 404 || $code == 405 ) {
+                return $self->ua->get_p($url)->then(
+                    sub {
+                        my $get_tx   = shift;
+                        my $get_code = $get_tx->result->code;
+                        return 1 if $get_code >= 200 && $get_code < 400;
+                        return 1
+                          if $get_code == 403
+                          || $get_code == 404
+                          || $get_code == 405;
+                        return Mojo::Promise->reject(
+                            "URL returned $get_code error")
+                          if $get_code >= 400;
+                        return Mojo::Promise->reject(
+                            "URL returned unexpected status: $get_code");
+                    }
+                );
+            }
             return Mojo::Promise->reject("URL returned $code error")
               if $code >= 400;
             return Mojo::Promise->reject(
@@ -295,11 +314,13 @@ sub validate_url_with_checks {
       unless $parsed->scheme && $parsed->scheme =~ /^https?$/i;
     return Mojo::Promise->reject('Invalid URL format') unless $parsed->host;
 
+    my $normalized = $parsed->to_string;
+
     return Mojo::Promise->reject(
         "URL exceeds maximum length of $MAX_URL_LENGTH characters")
-      unless $self->is_valid_url_length($sanitized);
+      unless $self->is_valid_url_length($normalized);
 
-    return $self->is_blocked_url($sanitized)->then(
+    return $self->is_blocked_url($normalized)->then(
         sub {
             my $blocked = shift;
             return Mojo::Promise->reject(
@@ -308,12 +329,12 @@ sub validate_url_with_checks {
 
             my $ssl_check =
                 $parsed->scheme eq 'https'
-              ? $self->check_ssl_certificate($sanitized)
+              ? $self->check_ssl_certificate($normalized)
               : Mojo::Promise->resolve(1);
 
             return $ssl_check->then(
-                sub { return $self->check_url_reachable($sanitized); } )
-              ->then( sub { return $sanitized; } );
+                sub { return $self->check_url_reachable($normalized); } )
+              ->then( sub { return $normalized; } );
         }
     );
 }
