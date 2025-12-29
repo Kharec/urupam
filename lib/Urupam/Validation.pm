@@ -95,39 +95,39 @@ sub _is_private_ipv4 {
 
 sub _is_private_ipv6 {
     my ( $self, $ip ) = @_;
+    return 0 unless defined $ip;
+
     $ip = lc($ip);
     $ip =~ s/^\[|\]$//g;
 
     return 1 if $ip eq '::1';
     return 1 if $ip eq '::';
-    return 1
-      if $ip =~ /^::ffff:(127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
 
-    if ( $ip =~ /^([0-9a-f]{0,4}:)+[0-9a-f]{0,4}$/ || $ip =~ /^::/ ) {
-        my @parts      = split /:/, $ip;
-        my $first_part = $parts[0] || '';
+    if ( $ip =~ /^::ffff:(.+)$/ ) {
+        return $self->_is_private_ipv4($1) ? 1 : 0;
+    }
 
-        if ( length($first_part) > 0 ) {
-            my $first = hex($first_part);
-            if ( $first >= 0xfc && $first <= 0xfd ) {
+    return 0 unless $ip =~ /^([0-9a-f]{0,4}:)+[0-9a-f]{0,4}$/ || $ip =~ /^::/;
+
+    my @parts = split /:/, $ip;
+    return 0 unless @parts > 0;
+
+    my $first_part = $parts[0] || '';
+    return 0 unless length($first_part) > 0;
+
+    my $first = hex($first_part);
+
+    if ( $first >= 0xfc && $first <= 0xfd ) {
+        return 1;
+    }
+
+    if ( $first == 0xfe && @parts > 1 ) {
+        my $second_part = $parts[1] || '';
+        if ( length($second_part) > 0 ) {
+            my $second = hex($second_part);
+            if ( $second >= 0x80 && $second <= 0xbf ) {
                 return 1;
             }
-            if ( $first == 0xfe && @parts > 1 ) {
-                my $second_part = $parts[1] || '';
-                if ( length($second_part) > 0 ) {
-                    my $second = hex($second_part);
-                    if ( $second >= 0x80 && $second <= 0xbf ) {
-                        return 1;
-                    }
-                }
-            }
-        }
-
-        if ( $ip =~ /^fc[0-9a-f]{2}:/i || $ip =~ /^fd[0-9a-f]{2}:/i ) {
-            return 1;
-        }
-        if ( $ip =~ /^fe[89ab][0-9a-f]:/i ) {
-            return 1;
         }
     }
 
