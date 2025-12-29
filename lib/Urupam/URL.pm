@@ -2,7 +2,8 @@ package Urupam::URL;
 
 use Mojo::Base -base;
 use Mojo::Promise;
-use Mojo::Util qw(b64_encode);
+use Mojo::Util            qw(b64_encode);
+use Bytes::Random::Secure qw(random_string_from random_bytes);
 
 has db => sub { die 'db attribute required' };
 
@@ -32,11 +33,7 @@ sub _validate_url {
 
 sub _generate_random_code {
     my ($self) = @_;
-    my $code = '';
-    for ( 1 .. $CODE_LENGTH ) {
-        $code .= substr( $CHARSET, int( rand( length($CHARSET) ) ), 1 );
-    }
-    return $code;
+    return random_string_from( $CHARSET, $CODE_LENGTH );
 }
 
 sub _generate_code_from_url {
@@ -55,9 +52,23 @@ sub _generate_code_from_url {
     }
 
     my $max_start = length($encoded) - $CODE_LENGTH;
-    my $start_pos = int( rand( ( $max_start > 0 ? $max_start : 0 ) + 1 ) );
+    my $range     = ( $max_start > 0 ? $max_start : 0 ) + 1;
+    my $start_pos = $self->_secure_int($range);
 
     return substr( $encoded, $start_pos, $CODE_LENGTH );
+}
+
+sub _secure_int {
+    my ( $self, $max ) = @_;
+    return 0 unless defined $max && $max > 1;
+
+    my $limit = int( 0xFFFFFFFF / $max ) * $max;
+    my $value;
+    do {
+        $value = unpack( 'N', random_bytes(4) );
+    } while ( $value >= $limit );
+
+    return $value % $max;
 }
 
 sub generate_short_code {
@@ -172,4 +183,3 @@ sub get_original_url {
 }
 
 1;
-
