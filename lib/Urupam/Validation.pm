@@ -4,8 +4,8 @@ use Mojo::Base -base;
 use Mojo::URL;
 use Mojo::UserAgent;
 use Mojo::Promise;
-use Mojo::IOLoop;
 use Urupam::Utils qw(sanitize_url);
+use Socket qw(getaddrinfo getnameinfo NI_NUMERICHOST NI_NUMERICSERV AF_INET AF_INET6 SOCK_STREAM);
 
 my $MAX_URL_LENGTH  = 2048;
 my $CONNECT_TIMEOUT = 10;
@@ -156,46 +156,25 @@ sub _resolve_host {
             [ { type => 'ipv6', ip => $ipv6_host } ] );
     }
 
-    my $loop     = Mojo::IOLoop->singleton;
-    my $resolver = $loop->resolver;
+    my ( $err, @results ) =
+      getaddrinfo( $host, undef, { socktype => SOCK_STREAM } );
+    return Mojo::Promise->resolve([]) if $err;
+
     my @addresses;
+    for my $res (@results) {
+        my ( $hostnum, undef ) =
+          getnameinfo( $res->{addr}, NI_NUMERICHOST | NI_NUMERICSERV );
+        next unless defined $hostnum && length $hostnum;
 
-    my $promise = Mojo::Promise->new;
-    my $pending = 2;
-    my $done    = sub {
-        $pending--;
-        if ( $pending == 0 ) {
-            $promise->resolve( \@addresses );
+        if ( $res->{family} == AF_INET ) {
+            push @addresses, { type => 'ipv4', ip => $hostnum };
         }
-    };
-
-    $resolver->resolve(
-        $host => sub {
-            my ( $resolver, $err, @results ) = @_;
-            if ( !$err && @results ) {
-                for my $result (@results) {
-                    push @addresses,
-                      { type => 'ipv4', ip => $result->{address} };
-                }
-            }
-            $done->();
+        elsif ( $res->{family} == AF_INET6 ) {
+            push @addresses, { type => 'ipv6', ip => $hostnum };
         }
-    );
+    }
 
-    $resolver->resolve(
-        $host => { type => 'AAAA' } => sub {
-            my ( $resolver, $err, @results ) = @_;
-            if ( !$err && @results ) {
-                for my $result (@results) {
-                    push @addresses,
-                      { type => 'ipv6', ip => $result->{address} };
-                }
-            }
-            $done->();
-        }
-    );
-
-    return $promise;
+    return Mojo::Promise->resolve( \@addresses );
 }
 
 sub is_blocked_url {
