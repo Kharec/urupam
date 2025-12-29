@@ -4,6 +4,7 @@ use Mojo::Base -base;
 use Mojo::URL;
 use Mojo::UserAgent;
 use Mojo::Promise;
+use Mojo::IOLoop;
 use Urupam::Utils qw(sanitize_url);
 
 my $MAX_URL_LENGTH  = 2048;
@@ -95,34 +96,148 @@ sub _is_private_ipv6 {
     my ( $self, $ip ) = @_;
     $ip = lc($ip);
     $ip =~ s/^\[|\]$//g;
-    return
-         $ip eq '::1'
-      || $ip eq '::'
-      || $ip =~ /^::ffff:(127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
+
+    return 1 if $ip eq '::1';
+    return 1 if $ip eq '::';
+    return 1
+      if $ip =~ /^::ffff:(127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
+
+    if ( $ip =~ /^([0-9a-f]{0,4}:)+[0-9a-f]{0,4}$/ || $ip =~ /^::/ ) {
+        my @parts      = split /:/, $ip;
+        my $first_part = $parts[0] || '';
+
+        if ( length($first_part) > 0 ) {
+            my $first = hex($first_part);
+            if ( $first >= 0xfc && $first <= 0xfd ) {
+                return 1;
+            }
+            if ( $first == 0xfe && @parts > 1 ) {
+                my $second_part = $parts[1] || '';
+                if ( length($second_part) > 0 ) {
+                    my $second = hex($second_part);
+                    if ( $second >= 0x80 && $second <= 0xbf ) {
+                        return 1;
+                    }
+                }
+            }
+        }
+
+        if ( $ip =~ /^fc[0-9a-f]{2}:/i || $ip =~ /^fd[0-9a-f]{2}:/i ) {
+            return 1;
+        }
+        if ( $ip =~ /^fe[89ab][0-9a-f]:/i ) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+sub _resolve_host {
+    my ( $self, $host ) = @_;
+    return Mojo::Promise->resolve( [] )
+      unless defined $host && length($host) > 0;
+
+    if ( $self->_is_valid_ipv4($host) ) {
+        return Mojo::Promise->resolve( [ { type => 'ipv4', ip => $host } ] );
+    }
+
+    my $ipv6_host = $host;
+    $ipv6_host =~ s/^\[|\]$//g;
+    if ( $self->_is_private_ipv6($ipv6_host) ) {
+        return Mojo::Promise->resolve(
+            [ { type => 'ipv6', ip => $ipv6_host } ] );
+    }
+
+    if (   $ipv6_host =~ /^([0-9a-f]{0,4}:){2,}[0-9a-f]{0,4}$/i
+        || $ipv6_host =~ /^::/ )
+    {
+        return Mojo::Promise->resolve(
+            [ { type => 'ipv6', ip => $ipv6_host } ] );
+    }
+
+    my $loop     = Mojo::IOLoop->singleton;
+    my $resolver = $loop->resolver;
+    my @addresses;
+
+    my $promise = Mojo::Promise->new;
+    my $pending = 2;
+    my $done    = sub {
+        $pending--;
+        if ( $pending == 0 ) {
+            $promise->resolve( \@addresses );
+        }
+    };
+
+    $resolver->resolve(
+        $host => sub {
+            my ( $resolver, $err, @results ) = @_;
+            if ( !$err && @results ) {
+                for my $result (@results) {
+                    push @addresses,
+                      { type => 'ipv4', ip => $result->{address} };
+                }
+            }
+            $done->();
+        }
+    );
+
+    $resolver->resolve(
+        $host => { type => 'AAAA' } => sub {
+            my ( $resolver, $err, @results ) = @_;
+            if ( !$err && @results ) {
+                for my $result (@results) {
+                    push @addresses,
+                      { type => 'ipv6', ip => $result->{address} };
+                }
+            }
+            $done->();
+        }
+    );
+
+    return $promise;
 }
 
 sub is_blocked_url {
     my ( $self, $url ) = @_;
-    return 0 unless defined $url;
+    return Mojo::Promise->resolve(0) unless defined $url;
 
     my $parsed = $self->_parse_url($url);
-    return 0 unless $parsed;
+    return Mojo::Promise->resolve(0) unless $parsed;
 
     my $host = lc( $parsed->host // '' );
+    return Mojo::Promise->resolve(0) unless length($host) > 0;
 
     for my $blocked (@BLOCKED_DOMAINS) {
-        return 1 if $host eq $blocked;
+        return Mojo::Promise->resolve(1) if $host eq $blocked;
     }
 
     if ( $self->_is_private_ipv4($host) ) {
-        return 1;
+        return Mojo::Promise->resolve(1);
     }
 
     if ( $self->_is_private_ipv6($host) ) {
-        return 1;
+        return Mojo::Promise->resolve(1);
     }
 
-    return 0;
+    return $self->_resolve_host($host)->then(
+        sub {
+            my $addresses = shift;
+            for my $addr (@$addresses) {
+                if (   $addr->{type} eq 'ipv4'
+                    && $self->_is_private_ipv4( $addr->{ip} ) )
+                {
+                    return 1;
+                }
+                if (   $addr->{type} eq 'ipv6'
+                    && $self->_is_private_ipv6( $addr->{ip} ) )
+                {
+                    return 1;
+                }
+            }
+            return 0;
+        }
+    );
 }
 
 sub check_url_reachable {
@@ -182,7 +297,7 @@ sub check_ssl_certificate {
 
 sub validate_short_code {
     my ( $self, $code ) = @_;
-    return defined $code && length($code) > 0 && $code =~ /^[0-9a-zA-Z\-_]+$/;
+    return defined $code && length($code) == 12 && $code =~ /^[0-9a-zA-Z\-_]+$/;
 }
 
 sub validate_url_with_checks {
@@ -204,18 +319,24 @@ sub validate_url_with_checks {
     return Mojo::Promise->reject(
         "URL exceeds maximum length of $MAX_URL_LENGTH characters")
       unless $self->is_valid_url_length($sanitized);
-    return Mojo::Promise->reject(
-        'This URL cannot be shortened (blocked domain or local address)')
-      if $self->is_blocked_url($sanitized);
 
-    my $ssl_check =
-        $parsed->scheme eq 'https'
-      ? $self->check_ssl_certificate($sanitized)
-      : Mojo::Promise->resolve(1);
+    return $self->is_blocked_url($sanitized)->then(
+        sub {
+            my $blocked = shift;
+            return Mojo::Promise->reject(
+                'This URL cannot be shortened (blocked domain or local address)'
+            ) if $blocked;
 
-    return $ssl_check->then(
-        sub { return $self->check_url_reachable($sanitized); } )
-      ->then( sub { return $sanitized; } );
+            my $ssl_check =
+                $parsed->scheme eq 'https'
+              ? $self->check_ssl_certificate($sanitized)
+              : Mojo::Promise->resolve(1);
+
+            return $ssl_check->then(
+                sub { return $self->check_url_reachable($sanitized); } )
+              ->then( sub { return $sanitized; } );
+        }
+    );
 }
 
 1;
