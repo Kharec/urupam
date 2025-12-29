@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Exporter 'import';
 use Mojo::URL;
-use Mojo::Util qw(url_unescape);
+use Mojo::Util qw(url_unescape decode);
 
 our @EXPORT_OK = qw(
   sanitize_input
@@ -34,8 +34,7 @@ sub sanitize_error_message {
     $sanitized =~ s/[^\p{L}\p{N}_\s\.\-\:\/]//gu;
     $sanitized =~ s/\s+/ /g;
     $sanitized =~ s/^\s+|\s+$//g;
-    return
-      length($sanitized) > 200
+    return length($sanitized) > 200
       ? substr( $sanitized, 0, 200 ) . '...'
       : $sanitized;
 }
@@ -78,13 +77,24 @@ sub sanitize_url {
 
     if ( $url =~ /%[0-9a-f]{2}/i ) {
         my $path = url_unescape( $parsed->path->to_string );
+        $path = decode( 'UTF-8', $path ) if length $path;
         $parsed->path($path);
 
         my $query = $parsed->query->to_string;
-        $parsed->query( url_unescape($query) ) if length $query;
+        if ( length $query ) {
+            my $decoded_query = url_unescape($query);
+            $decoded_query = decode( 'UTF-8', $decoded_query )
+              if length $decoded_query;
+            $parsed->query($decoded_query);
+        }
 
         my $fragment = $parsed->fragment;
-        $parsed->fragment( url_unescape($fragment) ) if defined $fragment;
+        if ( defined $fragment ) {
+            my $decoded_fragment = url_unescape($fragment);
+            $decoded_fragment = decode( 'UTF-8', $decoded_fragment )
+              if length $decoded_fragment;
+            $parsed->fragment($decoded_fragment);
+        }
 
         $url = $parsed->to_string;
     }
