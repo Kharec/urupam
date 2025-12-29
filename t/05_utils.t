@@ -107,6 +107,11 @@ subtest 'sanitize_url' => sub {
             'unescapes multiple percent-encoded segments'
         ],
         [
+            'https://fr.wikipedia.org/wiki/Pic_L%C3%A9nine',
+            'https://fr.wikipedia.org/wiki/Pic_L%C3%A9nine',
+            'preserves UTF-8 percent-encoded path'
+        ],
+        [
             'https://example.com?q=hello%20world',
             'https://example.com?q=hello%20world',
             'preserves percent-encoded query'
