@@ -4,6 +4,7 @@ use Mojo::Base -base;
 use Mojo::URL;
 use Mojo::UserAgent;
 use Mojo::Promise;
+use Mojo::IOLoop;
 use Urupam::Utils qw(sanitize_url);
 use Socket
   qw(getaddrinfo getnameinfo NI_NUMERICHOST NI_NUMERICSERV AF_INET AF_INET6 SOCK_STREAM);
@@ -24,6 +25,9 @@ my $PRIVATE_IP_PATTERN =
 my @BLOCKED_DOMAINS = qw(
   localhost 127.0.0.1 0.0.0.0 ::1
 );
+
+my $DNS_CACHE_TTL = 300;
+my %dns_cache;
 
 has ua => sub {
     my $self = shift;
@@ -146,25 +150,64 @@ sub _resolve_host {
             [ { type => 'ipv6', ip => $ipv6_host } ] );
     }
 
-    my ( $err, @results ) =
-      getaddrinfo( $host, undef, { socktype => SOCK_STREAM } );
-    return Mojo::Promise->resolve( [] ) if $err;
-
-    my @addresses;
-    for my $res (@results) {
-        my ( $hostnum, undef ) =
-          getnameinfo( $res->{addr}, NI_NUMERICHOST | NI_NUMERICSERV );
-        next unless defined $hostnum && length $hostnum;
-
-        if ( $res->{family} == AF_INET ) {
-            push @addresses, { type => 'ipv4', ip => $hostnum };
+    my $cache_key = lc($host);
+    my $now       = time();
+    if ( exists $dns_cache{$cache_key} ) {
+        my $cached = $dns_cache{$cache_key};
+        if ( $now < $cached->{expires} ) {
+            return Mojo::Promise->resolve( $cached->{addresses} );
         }
-        elsif ( $res->{family} == AF_INET6 ) {
-            push @addresses, { type => 'ipv6', ip => $hostnum };
-        }
+        delete $dns_cache{$cache_key};
     }
 
-    return Mojo::Promise->resolve( \@addresses );
+    my $promise = Mojo::Promise->new;
+    Mojo::IOLoop->subprocess(
+        sub {
+            my ($hostname) = @_;
+            my ( $err, @results ) =
+              getaddrinfo( $hostname, undef, { socktype => SOCK_STREAM } );
+            return { error => $err, results => \@results };
+        },
+        sub {
+            my ( $subprocess, $err, $data ) = @_;
+            if ($err) {
+                $promise->resolve( [] );
+                return;
+            }
+
+            my $res = $data;
+            if ( $res->{error} ) {
+                $promise->resolve( [] );
+                return;
+            }
+
+            my @addresses;
+            for my $result ( @{ $res->{results} } ) {
+                my ( $hostnum, undef ) =
+                  getnameinfo( $result->{addr},
+                    NI_NUMERICHOST | NI_NUMERICSERV );
+                next unless defined $hostnum && length $hostnum;
+
+                if ( $result->{family} == AF_INET ) {
+                    push @addresses, { type => 'ipv4', ip => $hostnum };
+                }
+                elsif ( $result->{family} == AF_INET6 ) {
+                    push @addresses, { type => 'ipv6', ip => $hostnum };
+                }
+            }
+
+            my $addresses_ref = \@addresses;
+            $dns_cache{$cache_key} = {
+                addresses => $addresses_ref,
+                expires   => $now + $DNS_CACHE_TTL
+            };
+
+            $promise->resolve($addresses_ref);
+        },
+        $host
+    );
+
+    return $promise;
 }
 
 sub is_blocked_url {
