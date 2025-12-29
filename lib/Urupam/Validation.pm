@@ -220,20 +220,50 @@ sub is_blocked_url {
     );
 }
 
-sub check_url_reachable {
-    my ( $self, $url ) = @_;
+sub _create_ssrf_safe_ua {
+    my $self = shift;
+    return Mojo::UserAgent->new(
+        connect_timeout => $self->connect_timeout,
+        request_timeout => $self->request_timeout,
+        max_redirects   => 0,
+        insecure        => 0
+    );
+}
 
-    return Mojo::Promise->reject('URL is required')
-      unless defined $url && length($url) > 0;
+sub _follow_redirect_with_validation {
+    my ( $self, $ua, $url, $redirect_count ) = @_;
+    $redirect_count //= 0;
 
-    return $self->ua->head_p($url)->then(
+    return Mojo::Promise->reject('Too many redirects')
+      if $redirect_count > $self->max_redirects;
+
+    return $ua->head_p($url)->then(
         sub {
             my $tx   = shift;
             my $code = $tx->result->code;
 
+            if ( $code >= 300 && $code < 400 ) {
+                my $location = $tx->result->headers->location;
+                return Mojo::Promise->reject('Redirect without Location header')
+                  unless defined $location;
+
+                my $redirect_url = Mojo::URL->new($location)->to_abs($url);
+                return $self->is_blocked_url($redirect_url)->then(
+                    sub {
+                        my $blocked = shift;
+                        if ($blocked) {
+                            return Mojo::Promise->reject(
+                                'Redirect to blocked domain or local address');
+                        }
+                        return $self->_follow_redirect_with_validation( $ua,
+                            $redirect_url, $redirect_count + 1 );
+                    }
+                );
+            }
+
             return 1 if $code >= 200 && $code < 400;
             if ( $code == 403 || $code == 404 || $code == 405 ) {
-                return $self->ua->get_p($url)->then(
+                return $ua->get_p($url)->then(
                     sub {
                         my $get_tx   = shift;
                         my $get_code = $get_tx->result->code;
@@ -264,6 +294,16 @@ sub check_url_reachable {
                 $self->_format_error_message( $error_type, $err_str ) );
         }
     );
+}
+
+sub check_url_reachable {
+    my ( $self, $url ) = @_;
+
+    return Mojo::Promise->reject('URL is required')
+      unless defined $url && length($url) > 0;
+
+    my $ssrf_ua = $self->_create_ssrf_safe_ua;
+    return $self->_follow_redirect_with_validation( $ssrf_ua, $url );
 }
 
 sub check_ssl_certificate {
