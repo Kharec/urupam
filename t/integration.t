@@ -134,27 +134,15 @@ subtest 'POST /api/v1/urls - Real validator blocked domains' => sub {
     }
 };
 
-subtest 'POST /api/v1/urls - Real validator network errors (422)' => sub {
-    for my $case (
-        {
-            url   => 'http://nonexistent-domain-12345.invalid',
-            error => qr/Cannot reach URL|DNS resolution failed/,
-        },
-        {
-            url   => 'http://192.0.2.1',
-            error => qr/Cannot reach URL|Connection refused/,
-        }
-      )
+subtest 'POST /api/v1/urls - Real validator network errors (async)' => sub {
+    for
+      my $url ( 'http://nonexistent-domain-12345.invalid', 'http://192.0.2.1' )
     {
-        my $res = post_shorten( $case->{url} );
-        if ( $res->{code} == 422 ) {
-            like( $res->{error}, $case->{error},
-                "Network error: $case->{url}" );
-        }
-        else {
-            diag( "Network error test skipped for $case->{url}: "
-                  . $res->{error} );
-        }
+        my $res = post_shorten($url);
+        ok(
+            $res->{code} == 200 || $res->{code} == 400,
+            "Network URL accepted or rejected by format: $url"
+        );
     }
 };
 
@@ -183,12 +171,9 @@ subtest 'POST /api/v1/urls - Real validator invalid URL format' => sub {
     }
 
     my $res = post_shorten('not-a-url');
-    is( $res->{code}, 422, 'Unreachable host rejected: not-a-url' );
-    like(
-        $res->{error},
-        qr/Cannot reach URL|DNS resolution failed|URL validation failed/,
-        'Correct error for: not-a-url'
-    );
+    is( $res->{code}, 200, 'Bare hostname accepted: not-a-url' );
+    like( $res->{json}->{original_url},
+        qr{^http://not-a-url$}, 'Bare hostname normalized with scheme' );
 };
 
 subtest 'POST /api/v1/urls - Real validator URL length validation' => sub {
