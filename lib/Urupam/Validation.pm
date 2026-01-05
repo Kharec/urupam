@@ -439,35 +439,30 @@ sub check_url_reachable_async {
 
 sub check_ssl_certificate {
     my ( $self, $url ) = @_;
-
-    return Mojo::Promise->reject('URL is required')
-      unless defined $url && length($url) > 0;
+    return Mojo::Promise->resolve(1) unless defined $url && length $url;
 
     my $parsed = $self->_parse_url($url);
     return Mojo::Promise->resolve(1)
       unless $parsed && $parsed->scheme && $parsed->scheme eq 'https';
 
-    return $self->ua->head_p($url)->then( sub { return 1; } )->catch(
-        sub {
-            my $err        = shift;
-            my $err_str    = "$err";
-            my $error_type = $self->_classify_error($err_str);
+    $self->_fire_and_forget(
+        $self->ua->head_p($url)->then( sub { return 1; } )->catch(
+            sub {
+                my $err        = shift;
+                my $err_str    = "$err";
+                my $error_type = $self->_classify_error($err_str);
 
-            if ( $error_type eq 'ssl' ) {
+                if ( $error_type eq 'ssl' ) {
+                    return Mojo::Promise->reject(
+                        "Invalid SSL certificate: $err_str");
+                }
+
                 return Mojo::Promise->reject(
-                    "Invalid SSL certificate: $err_str");
+                    $self->_format_error_message( $error_type, $err_str ) );
             }
-
-            return Mojo::Promise->reject(
-                $self->_format_error_message( $error_type, $err_str ) );
-        }
+        )
     );
-}
 
-sub check_ssl_certificate_async {
-    my ( $self, $url ) = @_;
-    return Mojo::Promise->resolve(1) unless defined $url && length $url;
-    $self->_fire_and_forget( $self->check_ssl_certificate($url) );
     return Mojo::Promise->resolve(1);
 }
 
@@ -507,7 +502,7 @@ sub validate_url_with_checks {
 
             my $ssl_check =
                 $parsed->scheme eq 'https'
-              ? $self->check_ssl_certificate_async($normalized)
+              ? $self->check_ssl_certificate($normalized)
               : Mojo::Promise->resolve(1);
 
             return $ssl_check->then(
