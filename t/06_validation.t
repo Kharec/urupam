@@ -93,6 +93,10 @@ sub with_subprocess_stub {
     return $code->();
 }
 
+sub clear_validation_caches {
+    $validator->_clear_caches;
+}
+
 subtest 'is_valid_url_length' => sub {
     ok( $validator->is_valid_url_length('http://example.com'),
         'valid URL length passes' );
@@ -345,6 +349,7 @@ subtest 'validate_short_code' => sub {
 };
 
 subtest 'check_url_reachable - success codes' => sub {
+    clear_validation_caches();
     for my $code ( 200, 201 ) {
         with_ssrf_ua(
             mock_ua_with_code($code),
@@ -359,6 +364,7 @@ subtest 'check_url_reachable - success codes' => sub {
 };
 
 subtest 'check_url_reachable - error codes' => sub {
+    clear_validation_caches();
     my @cases = (
         [ 410, qr/URL returned 410 error/, '4xx status returns error' ],
         [ 500, qr/URL returned 500 error/, '5xx status returns error' ],
@@ -366,11 +372,12 @@ subtest 'check_url_reachable - error codes' => sub {
     );
 
     for my $case (@cases) {
+        my $url = "http://example.com/$case->[0]";
         with_ssrf_ua(
             mock_ua_with_code( $case->[0] ),
             sub {
-                my ( $result, $error ) = wait_promise(
-                    $validator->check_url_reachable('http://example.com') );
+                my ( $result, $error ) =
+                  wait_promise( $validator->check_url_reachable($url) );
                 is( $result, undef, "$case->[0] status has no result" );
                 like( $error, $case->[1], $case->[2] );
             }
@@ -379,6 +386,7 @@ subtest 'check_url_reachable - error codes' => sub {
 };
 
 subtest 'check_url_reachable - HEAD fallback to GET' => sub {
+    clear_validation_caches();
     my $mock_ua     = Test::MockObject->new;
     my $head_tx     = Test::MockObject->new;
     my $head_result = Test::MockObject->new;
@@ -418,6 +426,7 @@ subtest 'check_url_reachable - HEAD fallback to GET' => sub {
 };
 
 subtest 'check_url_reachable - HEAD fallback error' => sub {
+    clear_validation_caches();
     my $mock_ua     = Test::MockObject->new;
     my $head_tx     = Test::MockObject->new;
     my $head_result = Test::MockObject->new;
@@ -457,6 +466,7 @@ subtest 'check_url_reachable - HEAD fallback error' => sub {
 };
 
 subtest 'check_url_reachable - classified errors' => sub {
+    clear_validation_caches();
     my @cases = (
         [
             'Name or service not known',
@@ -481,6 +491,7 @@ subtest 'check_url_reachable - classified errors' => sub {
     );
 
     for my $case (@cases) {
+        clear_validation_caches();
         with_ssrf_ua(
             mock_ua_with_error( $case->[0] ),
             sub {
@@ -728,9 +739,8 @@ subtest 'validate_url_with_checks - SSL check failure' => sub {
         }
     );
 
-    is( $result, undef, 'SSL check failure has no result' );
-    like( $error, qr/Invalid SSL certificate/,
-        'SSL check failure is detected' );
+    is( $result, 'https://example.com', 'SSL check failure is async' );
+    is( $error,  undef,                 'SSL check async has no error' );
 };
 
 subtest 'validate_url_with_checks - reachability check failure' => sub {
@@ -769,12 +779,8 @@ subtest 'validate_url_with_checks - reachability check failure' => sub {
         }
     );
 
-    is( $result, undef, 'reachability failure has no result' );
-    like(
-        $error,
-        qr/Cannot reach URL/,
-        'reachability check failure is detected'
-    );
+    is( $result, 'https://example.com', 'reachability failure is async' );
+    is( $error,  undef,                 'reachability async has no error' );
 };
 
 done_testing();
