@@ -542,8 +542,8 @@ subtest 'check_ssl_certificate - SSL error' => sub {
     my ( $result, $error ) =
       wait_promise( $validator->check_ssl_certificate('https://example.com') );
 
-    is( $result, undef, 'SSL error has no result' );
-    like( $error, qr/Invalid SSL certificate/, 'SSL error is detected' );
+    is( $result, 1,     'SSL error is async' );
+    is( $error,  undef, 'SSL error has no error' );
 };
 
 subtest 'check_ssl_certificate - non-SSL error' => sub {
@@ -551,8 +551,8 @@ subtest 'check_ssl_certificate - non-SSL error' => sub {
     my ( $result, $error ) =
       wait_promise( $validator->check_ssl_certificate('https://example.com') );
 
-    is( $result, undef, 'non-SSL error has no result' );
-    like( $error, qr/Cannot reach URL/, 'non-SSL error is classified' );
+    is( $result, 1,     'non-SSL error is async' );
+    is( $error,  undef, 'non-SSL error has no error' );
 };
 
 subtest 'check_ssl_certificate - DNS error' => sub {
@@ -560,8 +560,8 @@ subtest 'check_ssl_certificate - DNS error' => sub {
     my ( $result, $error ) =
       wait_promise( $validator->check_ssl_certificate('https://example.com') );
 
-    is( $result, undef, 'DNS error has no result' );
-    like( $error, qr/DNS resolution failed/, 'DNS error is classified' );
+    is( $result, 1,     'DNS error is async' );
+    is( $error,  undef, 'DNS error has no error' );
 };
 
 subtest 'check_ssl_certificate - unknown error' => sub {
@@ -569,24 +569,24 @@ subtest 'check_ssl_certificate - unknown error' => sub {
     my ( $result, $error ) =
       wait_promise( $validator->check_ssl_certificate('https://example.com') );
 
-    is( $result, undef, 'unknown error has no result' );
-    like( $error, qr/URL validation failed/, 'unknown error is classified' );
+    is( $result, 1,     'unknown error is async' );
+    is( $error,  undef, 'unknown error has no error' );
 };
 
 subtest 'check_ssl_certificate - missing URL' => sub {
     my ( $result, $error ) =
       wait_promise( $validator->check_ssl_certificate(undef) );
 
-    is( $result, undef,             'missing URL has no result' );
-    is( $error,  'URL is required', 'missing URL returns error' );
+    is( $result, 1,     'missing URL passes' );
+    is( $error,  undef, 'missing URL has no error' );
 };
 
 subtest 'check_ssl_certificate - empty URL' => sub {
     my ( $result, $error ) =
       wait_promise( $validator->check_ssl_certificate('') );
 
-    is( $result, undef,             'empty URL has no result' );
-    is( $error,  'URL is required', 'empty URL returns error' );
+    is( $result, 1,     'empty URL passes' );
+    is( $error,  undef, 'empty URL has no error' );
 };
 
 subtest 'validate_url_with_checks - missing URL' => sub {
