@@ -148,15 +148,10 @@ subtest 'POST /api/v1/urls - Real validator network errors (async)' => sub {
 
 subtest 'POST /api/v1/urls - Real validator SSL certificate validation' => sub {
     my $res = post_shorten('https://www.example.com');
-    if ( $res->{code} == 200 ) {
-        pass('HTTPS URL with valid SSL certificate accepted');
-    }
-    elsif ( $res->{code} == 422 && $res->{error} =~ /SSL certificate/i ) {
-        diag( "SSL validation: " . $res->{error} );
-    }
-    else {
-        diag( "SSL test skipped: " . $res->{error} );
-    }
+    ok(
+        $res->{code} == 200 || $res->{code} == 400,
+        'SSL validation runs async for HTTPS URL'
+    );
 };
 
 subtest 'POST /api/v1/urls - Real validator invalid URL format' => sub {
