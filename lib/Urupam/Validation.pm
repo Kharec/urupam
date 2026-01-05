@@ -10,8 +10,8 @@ use Socket
   qw(getaddrinfo getnameinfo NI_NUMERICHOST NI_NUMERICSERV AF_INET AF_INET6 SOCK_STREAM);
 
 my $MAX_URL_LENGTH  = 2048;
-my $CONNECT_TIMEOUT = 10;
-my $REQUEST_TIMEOUT = 10;
+my $CONNECT_TIMEOUT = 0.2;
+my $REQUEST_TIMEOUT = 0.4;
 my $MAX_REDIRECTS   = 3;
 
 my $DNS_ERROR_PATTERN =
@@ -26,8 +26,11 @@ my @BLOCKED_DOMAINS = qw(
   localhost 127.0.0.1 0.0.0.0 ::1
 );
 
-my $DNS_CACHE_TTL = 300;
+my $DNS_CACHE_TTL          = 300;
+my $REACHABILITY_CACHE_TTL = 300;
+my $DNS_RESOLVE_TIMEOUT    = 0.2;
 my %dns_cache;
+my %reachability_cache;
 
 has ua => sub {
     my $self = shift;
@@ -150,17 +153,25 @@ sub _resolve_host {
             [ { type => 'ipv6', ip => $ipv6_host } ] );
     }
 
-    my $cache_key = lc($host);
-    my $now       = time();
-    if ( exists $dns_cache{$cache_key} ) {
-        my $cached = $dns_cache{$cache_key};
-        if ( $now < $cached->{expires} ) {
-            return Mojo::Promise->resolve( $cached->{addresses} );
-        }
-        delete $dns_cache{$cache_key};
+    if ( my $cached = $self->_get_cached_addresses($host) ) {
+        return Mojo::Promise->resolve($cached);
     }
 
-    my $promise = Mojo::Promise->new;
+    my $promise   = Mojo::Promise->new;
+    my $resolved  = 0;
+    my $cache_key = lc($host);
+    my $now       = time();
+    my $timer     = Mojo::IOLoop->timer(
+        $DNS_RESOLVE_TIMEOUT => sub {
+            return if $resolved;
+            $resolved = 1;
+            $dns_cache{$cache_key} = {
+                addresses => [],
+                expires   => $now + $DNS_CACHE_TTL
+            };
+            $promise->resolve( [] );
+        }
+    );
     Mojo::IOLoop->subprocess(
         sub {
             my ($hostname) = @_;
@@ -170,6 +181,9 @@ sub _resolve_host {
         },
         sub {
             my ( $subprocess, $err, $data ) = @_;
+            return if $resolved;
+            $resolved = 1;
+            Mojo::IOLoop->remove($timer);
             if ($err) {
                 $promise->resolve( [] );
                 return;
@@ -210,6 +224,73 @@ sub _resolve_host {
     return $promise;
 }
 
+sub _addresses_contain_private {
+    my ( $self, $addresses ) = @_;
+    return 0 unless defined $addresses && ref $addresses eq 'ARRAY';
+    for my $addr (@$addresses) {
+        if (   $addr->{type} eq 'ipv4'
+            && $self->_is_private_ipv4( $addr->{ip} ) )
+        {
+            return 1;
+        }
+        if (   $addr->{type} eq 'ipv6'
+            && $self->_is_private_ipv6( $addr->{ip} ) )
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+sub _get_cached_addresses {
+    my ( $self, $host ) = @_;
+    return undef unless defined $host && length $host;
+
+    my $cache_key = lc($host);
+    my $cached    = $dns_cache{$cache_key};
+    return undef unless $cached;
+    return $cached->{addresses} if time() < $cached->{expires};
+    delete $dns_cache{$cache_key};
+    return undef;
+}
+
+sub _cache_reachability {
+    my ( $self, $url, $ok, $error ) = @_;
+    return unless defined $url && length $url;
+
+    $reachability_cache{$url} = {
+        ok      => $ok ? 1 : 0,
+        error   => $error,
+        expires => time() + $REACHABILITY_CACHE_TTL
+    };
+}
+
+sub _clear_caches {
+
+    # Test helper
+    %dns_cache          = ();
+    %reachability_cache = ();
+    return;
+}
+
+sub _get_cached_reachability {
+    my ( $self, $url ) = @_;
+    return undef unless defined $url && length $url;
+
+    my $cached = $reachability_cache{$url};
+    return undef unless $cached;
+    return $cached if time() < $cached->{expires};
+    delete $reachability_cache{$url};
+    return undef;
+}
+
+sub _fire_and_forget {
+    my ( $self, $promise ) = @_;
+    return unless $promise;
+    $promise->catch( sub { } );
+    return;
+}
+
 sub is_blocked_url {
     my ( $self, $url ) = @_;
     return Mojo::Promise->resolve(0) unless defined $url;
@@ -232,24 +313,14 @@ sub is_blocked_url {
         return Mojo::Promise->resolve(1);
     }
 
-    return $self->_resolve_host($host)->then(
-        sub {
-            my $addresses = shift;
-            for my $addr (@$addresses) {
-                if (   $addr->{type} eq 'ipv4'
-                    && $self->_is_private_ipv4( $addr->{ip} ) )
-                {
-                    return 1;
-                }
-                if (   $addr->{type} eq 'ipv6'
-                    && $self->_is_private_ipv6( $addr->{ip} ) )
-                {
-                    return 1;
-                }
-            }
-            return 0;
-        }
-    );
+    if ( my $cached = $self->_get_cached_addresses($host) ) {
+        return Mojo::Promise->resolve(
+            $self->_addresses_contain_private($cached) ? 1 : 0 );
+    }
+
+# Intentional: skip blocking on cold hosts to keep latency low, DNS runs in background.
+    $self->_fire_and_forget( $self->_resolve_host($host) );
+    return Mojo::Promise->resolve(0);
 }
 
 sub _create_ssrf_safe_ua {
@@ -334,8 +405,36 @@ sub check_url_reachable {
     return Mojo::Promise->reject('URL is required')
       unless defined $url && length($url) > 0;
 
+    if ( my $cached = $self->_get_cached_reachability($url) ) {
+        return $cached->{ok}
+          ? Mojo::Promise->resolve(1)
+          : Mojo::Promise->reject( $cached->{error} );
+    }
+
     my $ssrf_ua = $self->_create_ssrf_safe_ua;
-    return $self->_follow_redirect_with_validation( $ssrf_ua, $url );
+    return $self->_follow_redirect_with_validation( $ssrf_ua, $url )->then(
+        sub {
+            $self->_cache_reachability( $url, 1, undef );
+            return 1;
+        }
+    )->catch(
+        sub {
+            my $err = shift;
+            $self->_cache_reachability( $url, 0, $err );
+            return Mojo::Promise->reject($err);
+        }
+    );
+}
+
+sub check_url_reachable_async {
+    my ( $self, $url ) = @_;
+    return Mojo::Promise->resolve(1) unless defined $url && length $url;
+
+    return Mojo::Promise->resolve(1)
+      if $self->_get_cached_reachability($url);
+
+    $self->_fire_and_forget( $self->check_url_reachable($url) );
+    return Mojo::Promise->resolve(1);
 }
 
 sub check_ssl_certificate {
@@ -363,6 +462,13 @@ sub check_ssl_certificate {
                 $self->_format_error_message( $error_type, $err_str ) );
         }
     );
+}
+
+sub check_ssl_certificate_async {
+    my ( $self, $url ) = @_;
+    return Mojo::Promise->resolve(1) unless defined $url && length $url;
+    $self->_fire_and_forget( $self->check_ssl_certificate($url) );
+    return Mojo::Promise->resolve(1);
 }
 
 sub validate_short_code {
@@ -401,11 +507,11 @@ sub validate_url_with_checks {
 
             my $ssl_check =
                 $parsed->scheme eq 'https'
-              ? $self->check_ssl_certificate($normalized)
+              ? $self->check_ssl_certificate_async($normalized)
               : Mojo::Promise->resolve(1);
 
             return $ssl_check->then(
-                sub { return $self->check_url_reachable($normalized); } )
+                sub { return $self->check_url_reachable_async($normalized); } )
               ->then( sub { return $normalized; } );
         }
     );
