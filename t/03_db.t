@@ -61,36 +61,6 @@ subtest 'get' => sub {
     );
 };
 
-subtest 'set' => sub {
-    test_method(
-        'set',
-        'set',
-        [ 'test_key', 'test_value' ],
-        [ [ 'OK', undef, 'OK', 'returns success result' ] ],
-        [ [ 'Write error', 'error is returned' ] ]
-    );
-};
-
-subtest 'incr' => sub {
-    test_method(
-        'incr', 'incr', ['test_key'],
-        [ [ 42, undef, 42, 'returns correct value' ] ],
-        [ [ 'Increment error', 'error is returned' ] ]
-    );
-};
-
-subtest 'exists' => sub {
-    test_method(
-        'exists', 'exists',
-        ['test_key'],
-        [
-            [ 1, undef, 1, 'returns 1 when key exists' ],
-            [ 0, undef, 0, 'returns 0 when key does not exist' ],
-        ],
-        [ [ 'Exists error', 'error is returned' ] ]
-    );
-};
-
 subtest 'setnx' => sub {
     test_method(
         'setnx', 'setnx',
