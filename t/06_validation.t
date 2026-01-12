@@ -151,6 +151,38 @@ subtest '_format_error_message' => sub {
     );
 };
 
+subtest 'classify and format error string' => sub {
+    my @cases = (
+        [
+            'SSL certificate verification failed',
+            'SSL certificate error: SSL certificate verification failed',
+            'ssl error classified and formatted'
+        ],
+        [
+            'Name or service not known',
+            'DNS resolution failed: Name or service not known',
+            'dns error classified and formatted'
+        ],
+        [
+            'Connection refused',
+            'Cannot reach URL: Connection refused',
+            'connection error classified and formatted'
+        ],
+        [
+            'Some unknown error',
+            'URL validation failed: Some unknown error',
+            'unknown error classified and formatted'
+        ],
+    );
+
+    for my $case (@cases) {
+        my ( $err, $expected, $label ) = @$case;
+        my $type = $validator->_classify_error($err);
+        is( $validator->_format_error_message( $type, $err ),
+            $expected, $label );
+    }
+};
+
 subtest '_is_valid_ipv4' => sub {
     my @valid = (
         [ '192.168.1.1',     'valid IPv4 passes' ],
