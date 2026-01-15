@@ -6,6 +6,18 @@ my $t;
 eval { $t = Test::Mojo->new('Urupam::App'); 1 }
   or plan skip_all => "Test server not available: $@";
 
+sub wait_promise {
+    my ($promise) = @_;
+    my ( $value, $error );
+    $promise->then( sub { $value = shift } )
+      ->catch( sub { $error = shift } )
+      ->wait;
+    return ( $value, $error );
+}
+
+my ( $pong, $ping_err ) = wait_promise( $t->app->db->ping );
+plan skip_all => "Redis not available: $ping_err" if $ping_err;
+
 my $CODE_PATTERN   = qr/^[0-9a-zA-Z\-_]+$/;
 my $CODE_LENGTH    = 12;
 my $MAX_URL_LENGTH = 2048;
@@ -16,6 +28,12 @@ sub validate_short_code_format {
          defined $code
       && length($code) == $CODE_LENGTH
       && $code =~ $CODE_PATTERN;
+}
+
+sub expected_normalized_url {
+    my ($url) = @_;
+    return $url if defined $url && $url =~ m{^https?://}i;
+    return defined $url ? "http://$url" : undef;
 }
 
 sub post_shorten {
@@ -52,6 +70,8 @@ sub validate_shorten_response {
         "$label: short code valid" );
     is( length( $json->{short_code} ),
         $CODE_LENGTH, "$label: short code length correct" );
+    is( $json->{original_url}, $url, "$label: original URL matches" )
+      if defined $url;
     like(
         $json->{short_url},
         qr/^https?:\/\/[^\/]+\/$json->{short_code}$/,
@@ -81,39 +101,20 @@ sub validate_get_response {
     return 1;
 }
 
-sub skip_if_error {
-    my ( $res, $context ) = @_;
-    if ( $res->{code} != 200 && $res->{code} != 400 && $res->{code} != 404 ) {
-        diag( "$context skipped: " . $res->{error} );
-        return 1;
-    }
-    return 0;
-}
-
 subtest 'POST /api/v1/urls - Real validator success cases' => sub {
     for my $url ( 'https://www.example.com', 'http://www.perl.org' ) {
         my $res = post_shorten($url);
-        if ( $res->{code} == 200 ) {
-            validate_shorten_response( $res, $url, "URL: $url" );
-        }
-        else {
-            diag( "Test skipped for $url: " . $res->{error} );
-        }
+        is( $res->{code}, 200, "URL accepted: $url" );
+        validate_shorten_response( $res, $url, "URL: $url" );
     }
 };
 
 subtest 'POST /api/v1/urls - Real validator URL normalization' => sub {
     for my $input ( 'www.example.com', 'example.com' ) {
         my $res = post_shorten($input);
-        if ( $res->{code} == 200 ) {
-            like( $res->{json}->{original_url},
-                qr/^https?:\/\//, "URL normalized: $input" );
-            ok( validate_short_code_format( $res->{json}->{short_code} ),
-                "Code generated for: $input" );
-        }
-        else {
-            diag( "Normalization test skipped for $input: " . $res->{error} );
-        }
+        is( $res->{code}, 200, "URL normalized: $input" );
+        my $expected = expected_normalized_url($input);
+        validate_shorten_response( $res, $expected, "URL normalized: $input" );
     }
 };
 
@@ -139,19 +140,9 @@ subtest 'POST /api/v1/urls - Real validator network errors (async)' => sub {
       my $url ( 'http://nonexistent-domain-12345.invalid', 'http://192.0.2.1' )
     {
         my $res = post_shorten($url);
-        ok(
-            $res->{code} == 200 || $res->{code} == 400,
-            "Network URL accepted or rejected by format: $url"
-        );
+        is( $res->{code}, 200, "Network URL accepted asynchronously: $url" );
+        validate_shorten_response( $res, $url, "URL: $url" );
     }
-};
-
-subtest 'POST /api/v1/urls - Real validator SSL certificate validation' => sub {
-    my $res = post_shorten('https://www.example.com');
-    ok(
-        $res->{code} == 200 || $res->{code} == 400,
-        'SSL validation runs async for HTTPS URL'
-    );
 };
 
 subtest 'POST /api/v1/urls - Real validator invalid URL format' => sub {
@@ -165,10 +156,13 @@ subtest 'POST /api/v1/urls - Real validator invalid URL format' => sub {
         is( $res->{error}, $case->{error}, "Correct error for: $case->{url}" );
     }
 
+};
+
+subtest 'POST /api/v1/urls - Real validator bare hostname' => sub {
     my $res = post_shorten('not-a-url');
     is( $res->{code}, 200, 'Bare hostname accepted: not-a-url' );
-    like( $res->{json}->{original_url},
-        qr{^http://not-a-url$}, 'Bare hostname normalized with scheme' );
+    validate_shorten_response( $res, 'http://not-a-url',
+        'Bare hostname normalized' );
 };
 
 subtest 'POST /api/v1/urls - Real validator URL length validation' => sub {
@@ -191,15 +185,8 @@ subtest 'POST /api/v1/urls - Real validator URL edge cases' => sub {
       )
     {
         my $res = post_shorten($url);
-        if ( $res->{code} == 200 ) {
-            ok( validate_short_code_format( $res->{json}->{short_code} ),
-                "Edge case handled: $url" );
-            like( $res->{json}->{original_url},
-                qr/^https?:\/\//, "URL format preserved: $url" );
-        }
-        else {
-            diag( "Edge case test skipped for $url: " . $res->{error} );
-        }
+        is( $res->{code}, 200, "Edge case handled: $url" );
+        validate_shorten_response( $res, $url, "Edge case handled: $url" );
     }
 };
 
@@ -207,56 +194,40 @@ subtest 'POST /api/v1/urls - Real database persistence and retrieval' => sub {
     my $url  = 'https://www.example.com';
     my $res1 = post_shorten($url);
 
-    if ( $res1->{code} == 200 ) {
-        my $code = $res1->{json}->{short_code};
-        ok( validate_short_code_format($code), 'Code generated and stored' );
+    is( $res1->{code}, 200, 'Database write succeeded' );
+    my $code = $res1->{json}->{short_code};
+    ok( validate_short_code_format($code), 'Code generated and stored' );
 
-        my $res2 = get_url($code);
-        if ( $res2->{code} == 200 ) {
-            validate_get_response( $res2, $url, $code, 'Database retrieval' );
-            pass('Database persistence verified');
-        }
-        else {
-            diag( "Database retrieval failed: " . $res2->{error} );
-        }
-    }
-    else {
-        diag( "Database persistence test skipped: " . $res1->{error} );
-    }
+    my $res2 = get_url($code);
+    is( $res2->{code}, 200, 'Database read succeeded' );
+    validate_get_response( $res2, $url, $code, 'Database retrieval' );
+    pass('Database persistence verified');
 };
 
 subtest 'POST /api/v1/urls - Real database duplicate URL handling' => sub {
     my $url  = 'https://www.example.com';
     my $res1 = post_shorten($url);
 
-    if ( $res1->{code} == 200 ) {
-        my $code1 = $res1->{json}->{short_code};
-        ok( validate_short_code_format($code1), 'First code generated' );
+    is( $res1->{code}, 200, 'First create succeeded' );
+    my $code1 = $res1->{json}->{short_code};
+    ok( validate_short_code_format($code1), 'First code generated' );
 
-        my $res2 = post_shorten($url);
-        if ( $res2->{code} == 200 ) {
-            my $code2 = $res2->{json}->{short_code};
-            ok( validate_short_code_format($code2), 'Second code generated' );
-            ok( $code1 ne $code2, 'Duplicate URLs generate different codes' );
+    my $res2 = post_shorten($url);
+    is( $res2->{code}, 200, 'Second create succeeded' );
+    my $code2 = $res2->{json}->{short_code};
+    ok( validate_short_code_format($code2), 'Second code generated' );
+    ok( $code1 ne $code2, 'Duplicate URLs generate different codes' );
 
-            my $get1 = get_url($code1);
-            my $get2 = get_url($code2);
+    my $get1 = get_url($code1);
+    my $get2 = get_url($code2);
 
-            if ( $get1->{code} == 200 && $get2->{code} == 200 ) {
-                is( $get1->{json}->{original_url},
-                    $url, 'First code retrieves original URL' );
-                is( $get2->{json}->{original_url},
-                    $url, 'Second code retrieves original URL' );
-                pass('Both codes persist and retrieve same URL');
-            }
-        }
-        else {
-            diag( "Duplicate URL test skipped: " . $res2->{error} );
-        }
-    }
-    else {
-        diag( "Duplicate URL test skipped: " . $res1->{error} );
-    }
+    is( $get1->{code}, 200, 'First code retrieves' );
+    is( $get2->{code}, 200, 'Second code retrieves' );
+    is( $get1->{json}->{original_url},
+        $url, 'First code retrieves original URL' );
+    is( $get2->{json}->{original_url},
+        $url, 'Second code retrieves original URL' );
+    pass('Both codes persist and retrieve same URL');
 };
 
 subtest 'GET /api/v1/urls/:short_code - Real database error cases' => sub {
@@ -278,45 +249,6 @@ subtest 'GET /api/v1/urls/:short_code - Real database error cases' => sub {
         'Invalid short code format',
         'Correct error for: invalid@code'
     );
-};
-
-subtest 'End-to-end: Full flow with real components' => sub {
-    for my $url ( 'https://www.example.com', 'http://www.perl.org' ) {
-        my $res1 = post_shorten($url);
-
-        if ( $res1->{code} == 200 ) {
-            my $code = $res1->{json}->{short_code};
-            ok( validate_short_code_format($code), "Code generated for: $url" );
-
-            my $res2 = get_url($code);
-            if ( $res2->{code} == 200 ) {
-                validate_get_response( $res2, $url, $code, "End-to-end: $url" );
-            }
-            else {
-                diag( "End-to-end GET failed for $url: " . $res2->{error} );
-            }
-        }
-        else {
-            diag( "End-to-end POST failed for $url: " . $res1->{error} );
-        }
-    }
-};
-
-subtest 'Real database connection test' => sub {
-    my $res = post_shorten('https://www.example.com');
-
-    if ( $res->{code} == 200 ) {
-        pass('Database connection successful (Redis accessible)');
-        my $get_res = get_url( $res->{json}->{short_code} );
-        pass('Database read operation successful') if $get_res->{code} == 200;
-    }
-    elsif ( $res->{code} == 400 && $res->{error} =~ /Database error/i ) {
-        diag( "Database connection test: Redis may not be available - "
-              . $res->{error} );
-    }
-    else {
-        diag( "Database connection test skipped: " . $res->{error} );
-    }
 };
 
 done_testing();
