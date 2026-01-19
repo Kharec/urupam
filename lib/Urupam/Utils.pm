@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use Exporter 'import';
 use Mojo::URL;
+use Mojo::Path;
 use Mojo::Util qw(url_unescape decode);
 
 our @EXPORT_OK = qw(
@@ -78,7 +79,7 @@ sub sanitize_url {
     if ( $url =~ /%[0-9a-f]{2}/i ) {
         my $path = url_unescape( $parsed->path->to_string );
         $path = decode( 'UTF-8', $path ) if length $path;
-        $parsed->path($path);
+        $parsed->path( Mojo::Path->new($path) );
 
         my $query = $parsed->query->to_string;
         if ( length $query ) {
