@@ -10,6 +10,15 @@ use Urupam::Version;
 sub startup {
     my $self = shift;
 
+    my $db = Urupam::DB->new;
+    my $ping_error;
+    $db->ping->catch(
+        sub {
+            $ping_error = shift;
+        }
+    )->wait;
+    die("Cannot connect to Redis database: $ping_error\n") if ($ping_error);
+
     $self->helper(
         db => sub {
             my $c = shift;
