@@ -318,9 +318,12 @@ sub is_blocked_url {
             $self->_addresses_contain_private($cached) ? 1 : 0 );
     }
 
-# Intentional: skip blocking on cold hosts to keep latency low, DNS runs in background.
-    $self->_fire_and_forget( $self->_resolve_host($host) );
-    return Mojo::Promise->resolve(0);
+    return $self->_resolve_host($host)->then(
+        sub {
+            my $addresses = shift;
+            return $self->_addresses_contain_private($addresses) ? 1 : 0;
+        }
+    );
 }
 
 sub _create_ssrf_safe_ua {
