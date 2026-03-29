@@ -1,4 +1,4 @@
-FROM perl:5.42
+FROM perl:5.42-slim
 
 WORKDIR /opt/urupam
 
