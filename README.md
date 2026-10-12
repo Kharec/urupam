@@ -4,7 +4,7 @@
 
 ## Basic requirements
 
-- Perl 5.42.0
+- Perl 5.44.0
 - Carton (handles perl deps)
 - Redis
 
